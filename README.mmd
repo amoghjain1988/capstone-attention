@@ -1,172 +1,209 @@
 %% npx @mermaid-js/mermaid-cli -i README.mmd -o README.png -b white -s 3
+%%{init: {'flowchart': {'nodeSpacing': 12, 'rankSpacing': 20, 'padding': 4, 'useMaxWidth': false}, 'themeVariables': {'fontSize': '11px'}}}%%
 
 flowchart TD
 
-    Q(["Is attention a faithful interaction graph?<br/>Cut one edge. Predict again. Measure the shift.<br/>Faithfulness Index = corr of weight against shift"])
+subgraph HEAD["THE QUESTION"]
+    direction TB
+    Q["<b>Are AgentFormer attention weights FAITHFUL?</b><br/>Read attention as an N x N interaction graph.<br/>Remove edges. Predict again. Measure the shift."]
+    SCOPE["ETH / UCY · 5 scenes · public weights<br/>inference only · no training<br/><b>FAITHFULNESS, NOT CAUSALITY</b>"]
+end
 
-    subgraph SCRIPTS["scripts/ — run once, off-line"]
-        direction LR
-        DL["download_data.py<br/>get the pedestrian tracks"]
-        AFSET["setup_agentformer.py<br/>clone the repo, get the weights"]
-        EXTRACT["extract_attention.py<br/>run the model once,<br/>cache the attention to disk"]
-        AFSET --> EXTRACT
-    end
+subgraph SC["scripts/ · run once"]
+    direction TB
+    S1["<b>download_ethucy.py</b><br/>the 5 scenes"]
+    S2["<b>setup_agentformer.py</b><br/>repo and weights"]
+    S3["<b>extract_attention.py</b><br/>run once, cache"]
+end
+subgraph CT["THE CONTRACT · config.py + data/schema.py"]
+    direction LR
+    CFG["<b>config.py</b><br/>seeds · paths · 8 in, 12 out · k · alpha"]
+    D1[("<b>tracks</b><br/>scene · frame · agent<br/>x · y · vx · vy")]
+    D2[("<b>windows</b><br/>window_id · scene · t0 · agents<br/>hist · fut · overlap_group")]
+    D3[("<b>edges</b><br/>window_id · src · dst<br/>attn · dist · rank_attn · rank_dist")]
+    D4[("<b>ablations</b><br/>window_id · arm<br/>k · removed · shift")]
+    D5[("<b>context</b><br/>window_id · density · n_agents<br/>closing_speed · inv_ttc")]
+    D6[("<b>results</b><br/>window_id · model<br/>ade · fde · collision · ece")]
+    D7[("<b>verdicts</b><br/>hypothesis · effect<br/>ci · p_raw · p_adj")]
+    CFG --> D1 --> D2 --> D3
+    D4 --> D5 --> D6 --> D7
+end
 
-    subgraph SCHEMA["THE CONTRACT — every table and every constant in one place"]
-        direction LR
-        CFG["config.py<br/>seeds · paths · frame rate<br/>8 steps in, 12 steps out"]
-        T1[("tracks<br/>scene_id · frame_id · agent_id<br/>x · y · vx · vy")]
-        T2[("windows<br/>window_id · scene_id · t0<br/>agent_ids · hist 8x2 · fut 12x2")]
-        T3[("attention<br/>window_id · layer · head<br/>src_agent · dst_agent · weight")]
-        T4[("ablations<br/>window_id · src_agent · dst_agent<br/>weight · delta")]
-        T5[("predictions<br/>window_id · model · agent_id<br/>path 12x2 · sigma")]
-        T6[("results<br/>window_id · model<br/>ade · fde · collision · ece · fi")]
-        CFG ~~~ T1
-        T1 --> T2 --> T3 --> T4 --> T5 --> T6
-    end
+subgraph DT["src/data/"]
+    direction LR
+    L1["<b>loader_ethucy.py</b><br/>read the scenes"]
+    L2["<b>clean.py</b><br/>drop short tracks"]
+    L3["<b>windows.py</b><br/>8 in · 12 out<br/>tags the overlap"]
+    L4["<b>split.py</b><br/>leave one scene out"]
+    L5["<b>synthetic.py</b><br/>a KNOWN graph"]
+    L1 --> L2 --> L3 --> L4
+end
+subgraph FE["src/features/"]
+    direction TB
+    F1["<b>proximity.py</b><br/>distance rank · the H2 baseline"]
+    F2["<b>kinematics.py</b><br/>closing speed · inverse TTC"]
+    F3["<b>context.py</b><br/>crowd density · agent count"]
+end
 
-    subgraph DATA["src/data/ — tracks to windows"]
-        LOADER["loader.py<br/>read the raw files,<br/>one frame table"]
-        CLEAN["clean.py<br/>drop short tracks,<br/>fill small gaps"]
-        WINDOWS["windows.py<br/>cut into 8-step history<br/>and 12-step future"]
-        SYNTH["synthetic.py<br/>scenes with a KNOWN<br/>interaction graph"]
-        SPLIT["split.py<br/>split BY SCENE.<br/>never by agent"]
-        LOADER --> CLEAN --> WINDOWS --> SPLIT
-        SYNTH --> WINDOWS
-    end
+subgraph ED["src/eda/ · look before you model"]
+    direction TB
+    E1["<b>summary.py</b><br/>scenes · agents · windows"]
+    E2["<b>density.py</b><br/>neighbours per window"]
+    E3["<b>distributions.py</b><br/>step · speed · spacing"]
+    E4["<b>scaling.py</b><br/>raw · z-score · log"]
+    E5["<b>missing.py</b><br/>gaps and bad frames"]
+    E6["<b>overlap.py</b><br/>windows share data"]
+    E1 --> E2 --> E3
+    E4 --> E5 --> E6
+end
+subgraph ME["src/metrics/"]
+    direction TB
+    C1["<b>accuracy.py</b><br/>ADE · FDE"]
+    C2["<b>collision.py</b><br/>do paths touch"]
+    C3["<b>calibration.py</b><br/>ECE"]
+end
 
-    subgraph EDA["src/eda/ — look before you model"]
-        E1["summary.py<br/>scenes, agents, frames.<br/>how many windows survive"]
-        E2["density.py<br/>neighbours per window.<br/>a lone agent has no graph"]
-        E3["distributions.py<br/>step size, speed, spacing.<br/>histograms and tails"]
-        E4["scaling.py<br/>raw, z-score, or log?<br/>spacing has a heavy tail"]
-        E5["missing.py<br/>gaps, jumps, bad frames"]
-        E1 --> E2 --> E3 --> E4 --> E5
-    end
+subgraph MO["src/models/ · one Protocol, many bodies"]
+    direction TB
+    M0["<b>base.py</b> · PREDICTOR PROTOCOL<br/>predict(hist, mask) returns 12x2 and sigma"]
+    M1["<b>cv.py</b><br/>constant velocity"]
+    M2["<b>ekf.py</b><br/>Kalman filter"]
+    M3["<b>mock.py</b><br/>day one, no data"]
+    M4["<b>cached.py</b><br/>parquet replay, no GPU"]
+    M5["<b>agentformer.py</b><br/>THE SWAP POINT"]
+    M0 -.-> M1
+    M0 -.-> M2
+    M0 -.-> M3
+    M0 -.-> M4
+    M0 -.-> M5
+end
 
-    subgraph MODELS["src/models/ — one Protocol, many bodies"]
-        direction LR
-        BASE["base.py<br/>the Predictor Protocol.<br/>every model obeys it"]
-        CV["cv.py<br/>constant velocity.<br/>motion only, no neighbours"]
-        EKF["ekf.py<br/>extended Kalman filter.<br/>motion only, with noise"]
-        MOCK["mock.py<br/>fake model for the tests"]
-        CACHED["cached.py<br/>replay the cached attention.<br/>no GPU needed"]
-        AF["agentformer.py<br/>THE SWAP POINT.<br/>the real transformer"]
-        BASE -.-> CV
-        BASE -.-> EKF
-        BASE -.-> MOCK
-        BASE -.-> CACHED
-        BASE -.-> AF
-    end
+subgraph AT["src/attention/"]
+    direction LR
+    A1["<b>extract.py</b><br/>hook the layers"]
+    A2["<b>aggregate.py</b><br/>heads to one N x N"]
+    A3["<b>rank.py</b><br/>order the edges"]
+    A1 --> A2 --> A3
+end
+subgraph FA["src/faithfulness/"]
+    direction TB
+    G1["<b>index.py</b><br/>area between the curves"]
+    G2["<b>validation.py</b><br/>AUROC vs known graph"]
+    G3["<b>sanity.py</b><br/>remove nothing, nothing moves"]
+end
 
-    subgraph FAITH["src/faithfulness/ — the core claim"]
-        GRAPH["graph.py<br/>attention heads to one<br/>N x N edge matrix"]
-        ABL["ablation.py<br/>delete edge i-j,<br/>predict again"]
-        INDEX["index.py<br/>heavy edge, or decoration?"]
-        VALID["validation.py<br/>AUROC against the<br/>known synthetic graph"]
-        GRAPH --> ABL --> INDEX --> VALID
-    end
+subgraph AB["src/ablation/ · THE FOUR ARMS"]
+    direction TB
+    R1["<b>MoRF</b><br/>strongest first"]
+    R2["<b>LeRF</b><br/>weakest first"]
+    R3["<b>Nearest</b><br/>closest first"]
+    R4["<b>Random</b><br/>the floor"]
+    R5["<b>intervene.py</b> · mask the edge, predict again"]
+    R6["<b>shift.py</b> · how far the forecast moved"]
+    R7["<b>curves.py</b> · shift against k"]
+    R1 --> R5
+    R2 --> R5
+    R3 --> R5
+    R4 --> R5
+    R5 --> R6 --> R7
+end
+subgraph TE["tests/ · fast, no GPU"]
+    direction TB
+    Z1["<b>test_shapes.py</b><br/>every model returns 12x2"]
+    Z2["<b>test_ablation.py</b><br/>remove nothing, nothing moves"]
+    Z3["<b>test_synthetic.py</b><br/>the known graph comes back"]
+end
 
-    subgraph METRICS["src/metrics/"]
-        direction LR
-        ACC["accuracy.py<br/>ADE and FDE"]
-        COLL["collision.py<br/>how often the paths touch"]
-        CAL["calibration.py<br/>ECE. is the model honest<br/>about its own doubt?"]
-    end
+subgraph HY["src/hypotheses/ · one file, one claim"]
+    direction TB
+    Y0["<b>design.py</b> · alpha · effect size · power<br/>written down BEFORE the run"]
+    YC["<b>data_checks.py</b> · is the input fit to test?<br/>pairing · ties · degenerate windows"]
+    Y1["<b>h1_morf_vs_lerf.py</b><br/>MoRF shifts more<br/>than LeRF"]
+    Y2["<b>h2_beyond_proximity.py</b><br/>attention beats<br/>plain distance"]
+    Y3["<b>h3_context.py</b><br/>when is attention<br/>most faithful"]
+    YV["<b>validate.py</b> · LOSO · k sweep · other aggregation"]
+    Y0 --> YC
+    YC --> Y1 & Y2 & Y3
+    Y1 & Y2 & Y3 --> YV
+end
+subgraph ST["src/stats/"]
+    direction TB
+    T1["<b>clustered.py</b><br/>bootstrap by scene<br/>and by pedestrian"]
+    T2["<b>loso.py</b><br/>leave one<br/>scene out"]
+    T3["<b>effects.py</b><br/>effect size<br/>and CI"]
+    T4["<b>correction.py</b> · Holm over 3 claims"]
+    T5["<b>report.py</b> · one row per claim"]
+    T1 --> T4
+    T2 --> T4
+    T3 --> T4
+    T4 --> T5
+end
 
-    subgraph HYP["src/hypotheses/ — one file, one claim, one test"]
-        direction LR
-        DESIGN["design.py<br/>ARE THESE THE RIGHT CLAIMS?<br/>effect size, power, sample size.<br/>write it down BEFORE the run"]
-        H1["h1_faithful.py<br/>heavy edges move the path<br/>more than light edges"]
-        H2["h2_social_gain.py<br/>the transformer beats<br/>CV and EKF on ADE"]
-        H3["h3_recovers_graph.py<br/>attention finds the true<br/>synthetic edges"]
-        H4["h4_calibrated.py<br/>the stated doubt matches<br/>the real error"]
-        ASSUME["assumptions.py<br/>normal? independent?<br/>scenes are NOT independent"]
-        DESIGN --> H1 & H2 & H3 & H4
-    end
+subgraph OUT["THE OUTPUT"]
+    direction LR
+    TOOL["<b>tools</b> · Python · PyTorch · AgentFormer<br/>NumPy · pandas · Parquet · SciPy<br/>statsmodels · Matplotlib · pytest"]
+    NB["<b>capstone.ipynb</b> · THE ONE NOTEBOOK<br/>calls, plots, writes up.<br/>no logic lives here"]
+end
 
-    subgraph STATS["src/stats/ — the shared machinery"]
-        direction LR
-        BOOT["bootstrap.py<br/>resample by SCENE,<br/>not by agent"]
-        PERM["permutation.py<br/>shuffle the edge weights,<br/>keep the graph shape"]
-        CORR["correction.py<br/>4 hypotheses, 4 chances<br/>to be lucky. correct for it"]
-        REPORT["report.py<br/>one row per hypothesis:<br/>effect, CI, p, verdict"]
-        BOOT --> CORR
-        PERM --> CORR
-        CORR --> REPORT
-    end
+HEAD --> CT
+HEAD --> SC
+SC --> DT
+SC --> FE
+DT --> ED
+DT --> MO
+MO --> AT
+AB --> ME
+AT --> TE
+AT --> AB
+FE --> AB
+AB --> FA
+AB --> ST
+FA --> HY
+ME --> HY
+ST --> HY
+HY --> OUT
 
-    subgraph TESTS["tests/ — cheap, fast, no GPU"]
-        direction LR
-        TS1["test_shapes.py<br/>every model returns 12x2"]
-        TS2["test_ablation.py<br/>delete nothing,<br/>the path must not move"]
-        TS3["test_synthetic.py<br/>the known graph<br/>comes back out"]
-    end
 
-    NB["capstone.ipynb<br/>THE ONE NOTEBOOK.<br/>calls, plots, writes up.<br/>no logic lives here"]
+style HEAD fill:#ffffff,stroke:#212121,stroke-width:3px,color:#000000
+style SC fill:#eceff1,stroke:#546e7a,stroke-width:2px,color:#263238
+style CT fill:#e8eaf6,stroke:#3949ab,stroke-width:2px,color:#1a237e
+style DT fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+style FE fill:#f9fbe7,stroke:#9e9d24,stroke-width:2px,color:#827717
+style ED fill:#e0f7fa,stroke:#00838f,stroke-width:2px,color:#006064
+style ME fill:#fce4ec,stroke:#ad1457,stroke-width:2px,color:#880e4f
+style MO fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
+style AT fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+style AB fill:#fff8e1,stroke:#ef6c00,stroke-width:4px,color:#e65100
+style FA fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+style HY fill:#e8f5e9,stroke:#2e7d32,stroke-width:4px,color:#1b5e20
+style ST fill:#f1f8e9,stroke:#558b2f,stroke-width:2px,color:#33691e
+style TE fill:#fafafa,stroke:#9e9e9e,stroke-width:2px,color:#424242
+style OUT fill:#eeeeee,stroke:#212121,stroke-width:2px,color:#000000
 
-    Q --> SCRIPTS
-    DL --> LOADER
-    EXTRACT --> CACHED
-    WINDOWS --> E1
-    E4 -. choose the transform .-> WINDOWS
-    E5 --> ASSUME
-    SPLIT --> BASE
-    MOCK --> TESTS
-    AF --> GRAPH
-    CACHED --> GRAPH
-    SYNTH -. ground truth .-> VALID
-    CV --> ACC
-    EKF --> ACC
-    AF --> ACC
-    INDEX --> H1
-    ACC --> H2
-    COLL --> H2
-    VALID --> H3
-    CAL --> H4
-    ASSUME --> BOOT
-    H1 --> BOOT
-    H2 --> BOOT
-    H3 --> PERM
-    H4 --> BOOT
-    REPORT --> NB
+classDef head fill:#ffffff,stroke:#212121,stroke-width:2px,color:#000000
+classDef file fill:#ffffff,stroke:#90a4ae,stroke-width:1px,color:#263238
+classDef tab fill:#c5cae9,stroke:#283593,stroke-width:1px,color:#1a237e
+classDef proto fill:#ce93d8,stroke:#4a148c,stroke-width:3px,color:#311b92
+classDef swap fill:#ffb74d,stroke:#e65100,stroke-width:3px,color:#3e2723
+classDef hot fill:#ef5350,stroke:#b71c1c,stroke-width:2px,color:#ffffff
+classDef cold fill:#42a5f5,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+classDef near fill:#bdbdbd,stroke:#424242,stroke-width:2px,color:#212121
+classDef rand fill:#fafafa,stroke:#9e9e9e,stroke-width:1px,color:#616161
+classDef gate fill:#a5d6a7,stroke:#1b5e20,stroke-width:3px,color:#1b5e20
+classDef claim fill:#ffffff,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+classDef out fill:#212121,stroke:#000000,stroke-width:2px,color:#ffffff
 
-    subgraph KEY["how to read this"]
-        direction LR
-        K1[("a table in the contract")]
-        K2["a file to write"]
-        K3["the core claim"]
-        K4["STOP and decide"]
-        K5["the one output"]
-    end
-
-    style SCRIPTS fill:#eceff1,stroke:#546e7a,stroke-width:2px,color:#263238
-    style SCHEMA fill:#e8eaf6,stroke:#3949ab,stroke-width:2px,color:#1a237e
-    style DATA fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
-    style EDA fill:#e0f7fa,stroke:#00838f,stroke-width:2px,color:#006064
-    style MODELS fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
-    style FAITH fill:#fff8e1,stroke:#ef6c00,stroke-width:4px,color:#e65100
-    style METRICS fill:#fce4ec,stroke:#ad1457,stroke-width:2px,color:#880e4f
-    style HYP fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
-    style STATS fill:#f1f8e9,stroke:#558b2f,stroke-width:2px,color:#33691e
-    style TESTS fill:#fafafa,stroke:#9e9e9e,stroke-width:2px,color:#424242
-    style KEY fill:#ffffff,stroke:#bdbdbd,stroke-width:1px,color:#616161
-
-    classDef file fill:#ffffff,stroke:#78909c,stroke-width:1px,color:#263238
-    classDef question fill:#ffffff,stroke:#212121,stroke-width:3px,color:#000000
-    classDef swap fill:#ffb74d,stroke:#e65100,stroke-width:3px,color:#3e2723
-    classDef core fill:#ffe0b2,stroke:#ef6c00,stroke-width:2px,color:#3e2723
-    classDef table fill:#c5cae9,stroke:#283593,stroke-width:1px,color:#1a237e
-    classDef gate fill:#a5d6a7,stroke:#1b5e20,stroke-width:3px,color:#1b5e20
-    classDef out fill:#212121,stroke:#000000,stroke-width:2px,color:#ffffff
-
-    class DL,AFSET,EXTRACT,LOADER,CLEAN,WINDOWS,SYNTH,SPLIT file
-    class E1,E2,E3,E4,E5,BASE,CV,EKF,MOCK,CACHED file
-    class ACC,COLL,CAL,H1,H2,H3,H4,BOOT,PERM,CORR,REPORT file
-    class TS1,TS2,TS3,K2 file
-    class Q question
-    class AF swap
-    class GRAPH,ABL,INDEX,VALID,K3 core
-    class CFG,T1,T2,T3,T4,T5,T6,K1 table
-    class DESIGN,ASSUME,K4 gate
-    class NB,K5 out
+class Q,SCOPE head
+class S1,S2,S3,L1,L2,L3,L4,L5,E1,E2,E3,E4,E5,E6 file
+class F1,F2,F3,M1,M2,M3,M4,A1,A2,A3,R5,R6,R7 file
+class G1,G2,G3,C1,C2,C3,T1,T2,T3,T4,T5,Z1,Z2,Z3,YV file
+class CFG,D1,D2,D3,D4,D5,D6,D7 tab
+class M0 proto
+class M5 swap
+class R1 hot
+class R2 cold
+class R3 near
+class R4 rand
+class Y0,YC gate
+class Y1,Y2,Y3 claim
+class NB,TOOL out
