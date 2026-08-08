@@ -46,7 +46,7 @@ subgraph FE["src/features/"]
 end
 
 subgraph ED["src/eda/ · look before you model"]
-    direction TB
+    direction LR
     E1["<b>summary.py</b><br/>scenes · agents · windows"]
     E2["<b>density.py</b><br/>neighbours per window"]
     E3["<b>distributions.py</b><br/>step · speed · spacing"]
@@ -87,7 +87,7 @@ subgraph AT["src/attention/"]
 end
 subgraph FA["src/faithfulness/"]
     direction TB
-    G1["<b>index.py</b><br/>area between the curves"]
+    G1["<b>index.py</b> · Faithfulness Index<br/>FI = sum over k of<br/>[ S_MoRF(k) − S_LeRF(k) ]<br/>the area between the two curves"]
     G2["<b>validation.py</b><br/>AUROC vs known graph"]
     G3["<b>sanity.py</b><br/>remove nothing, nothing moves"]
 end
@@ -99,8 +99,8 @@ subgraph AB["src/ablation/ · THE FOUR ARMS"]
     R3["<b>Nearest</b><br/>closest first"]
     R4["<b>Random</b><br/>the floor"]
     R5["<b>intervene.py</b> · mask the edge, predict again"]
-    R6["<b>shift.py</b> · how far the forecast moved"]
-    R7["<b>curves.py</b> · shift against k"]
+    R6["<b>shift.py</b> · how far the forecast moved<br/>shift = mean over the 12 steps of<br/>dist( path_ablated , path_full )<br/>against the UNABLATED path, not the truth"]
+    R7["<b>curves.py</b> · S(k) for each arm<br/>k = 1, 2, 3 ... edges removed"]
     R1 --> R5
     R2 --> R5
     R3 --> R5
@@ -116,23 +116,37 @@ end
 
 subgraph HY["src/hypotheses/ · one file, one claim"]
     direction TB
-    Y0["<b>design.py</b> · alpha · effect size · power<br/>written down BEFORE the run"]
-    YC["<b>data_checks.py</b> · is the input fit to test?<br/>pairing · ties · degenerate windows"]
-    Y1["<b>h1_morf_vs_lerf.py</b><br/>MoRF shifts more<br/>than LeRF"]
-    Y2["<b>h2_beyond_proximity.py</b><br/>attention beats<br/>plain distance"]
-    Y3["<b>h3_context.py</b><br/>when is attention<br/>most faithful"]
-    YV["<b>validate.py</b> · LOSO · k sweep · other aggregation"]
-    Y0 --> YC
+    Y0["<b>design.py</b> · one-sided · alpha = 0.05 · minimum effect · power<br/>written down BEFORE the run"]
+    YC["<b>data_checks.py</b> · is the input fit to test?<br/>every window has all 4 arms · no missing pair · ties counted<br/>degenerate window: MoRF and LeRF pick the SAME edge → drop"]
+    subgraph CH["<b>choose_test.py</b> · IS THIS THE RIGHT TEST FOR THIS DISTRIBUTION?"]
+        direction LR
+        K1["<b>1 · is it paired?</b><br/>same window, two arms<br/>→ yes. use the differences D_i"]
+        K2["<b>2 · what shape is D?</b><br/>histogram · QQ plot · skew<br/>Shapiro-Wilk on D<br/>report the shape, do not assume it"]
+        K3["<b>3a · symmetric</b><br/>→ Wilcoxon signed-rank,<br/>one-sided.<br/>it tests the MEDIAN"]
+        K4["<b>3b · skewed or heavy tail</b><br/>→ sign test on the median,<br/>or bootstrap the median of D.<br/>never a plain t-test"]
+        K5["<b>4 · are the rows independent?</b> NO.<br/>windows overlap · pedestrians repeat · only 5 scenes<br/>→ p from permutation INSIDE the scene<br/>→ CI from the cluster bootstrap"]
+        K1 --> K2
+        K2 --> K3
+        K2 --> K4
+        K3 --> K5
+        K4 --> K5
+    end
+    Y1["<b>h1_morf_vs_lerf.py</b><br/>D_i = shift(MoRF) − shift(LeRF)<br/>H0: median(D) ≤ 0<br/>H1: median(D) is greater than 0"]
+    Y2["<b>h2_beyond_proximity.py</b><br/>D_i = shift(MoRF) − shift(Nearest)<br/>H0: median(D) ≤ 0<br/>H1: attention beats plain distance"]
+    Y3["<b>h3_context.py</b><br/>FI_i = b0 + b·context + u_scene<br/>context = density, n_agents,<br/>closing speed, inverse TTC<br/>H0: every b = 0, joint test"]
+    YV["<b>validate.py</b> · does the answer survive?<br/>LOSO · k sweep · another head aggregation · the Random arm as the floor"]
+    Y0 --> CH
+    CH --> YC
     YC --> Y1 & Y2 & Y3
     Y1 & Y2 & Y3 --> YV
 end
 subgraph ST["src/stats/"]
     direction TB
-    T1["<b>clustered.py</b><br/>bootstrap by scene<br/>and by pedestrian"]
+    T1["<b>clustered.py</b><br/>resample SCENE, then pedestrian.<br/>B = 2000. percentile CI"]
     T2["<b>loso.py</b><br/>leave one<br/>scene out"]
-    T3["<b>effects.py</b><br/>effect size<br/>and CI"]
-    T4["<b>correction.py</b> · Holm over 3 claims"]
-    T5["<b>report.py</b> · one row per claim"]
+    T3["<b>effects.py</b><br/>rank-biserial r<br/>and Cliff delta.<br/>an effect, not just a p"]
+    T4["<b>correction.py</b> · Holm over 3 claims · alpha = 0.05"]
+    T5["<b>report.py</b> · one row per claim:<br/>test used · why · effect · CI · p_adj · verdict"]
     T1 --> T4
     T2 --> T4
     T3 --> T4
@@ -175,6 +189,7 @@ style MO fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
 style AT fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
 style AB fill:#fff8e1,stroke:#ef6c00,stroke-width:4px,color:#e65100
 style FA fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+style CH fill:#c8e6c9,stroke:#1b5e20,stroke-width:3px,color:#1b5e20
 style HY fill:#e8f5e9,stroke:#2e7d32,stroke-width:4px,color:#1b5e20
 style ST fill:#f1f8e9,stroke:#558b2f,stroke-width:2px,color:#33691e
 style TE fill:#fafafa,stroke:#9e9e9e,stroke-width:2px,color:#424242
@@ -205,5 +220,7 @@ class R2 cold
 class R3 near
 class R4 rand
 class Y0,YC gate
+class K1,K2,K5 gate
+class K3,K4 claim
 class Y1,Y2,Y3 claim
 class NB,TOOL out
