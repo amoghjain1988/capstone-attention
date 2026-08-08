@@ -1,0 +1,92 @@
+%% npx @mermaid-js/mermaid-cli -i README.mmd -o README.png -b white -s 3
+
+flowchart TD
+
+    Q(["Is attention a faithful interaction graph?<br/>Cut one edge. Predict again. Measure the shift.<br/>Faithfulness Index = corr(weight, shift)"])
+
+    subgraph SCRIPTS["scripts/ — run once, off-line"]
+        DL["download_data.py<br/>get the pedestrian tracks"]
+        AFSET["setup_agentformer.py<br/>clone the repo, get the weights"]
+        EXTRACT["extract_attention.py<br/>run the model once,<br/>cache the attention to disk"]
+    end
+
+    subgraph DATA["src/data/ — tracks to windows"]
+        LOADER["loader.py<br/>read the raw files,<br/>one frame table"]
+        WINDOWS["windows.py<br/>cut into 8-step history<br/>and 12-step future"]
+        SYNTH["synthetic.py<br/>scenes with a KNOWN<br/>interaction graph"]
+    end
+
+    subgraph MODELS["src/models/ — one Protocol, many bodies"]
+        BASE["base.py<br/>the Predictor Protocol.<br/>every model obeys it"]
+        CV["cv.py<br/>constant velocity.<br/>motion only, no neighbours"]
+        EKF["ekf.py<br/>extended Kalman filter.<br/>motion only, with noise"]
+        MOCK["mock.py<br/>fake model for the tests"]
+        CACHED["cached.py<br/>replay the cached attention.<br/>no GPU needed"]
+        AF["agentformer.py<br/>THE SWAP POINT.<br/>the real transformer"]
+    end
+
+    subgraph FAITH["src/faithfulness/ — the core claim"]
+        GRAPH["graph.py<br/>attention heads to one<br/>N x N edge matrix"]
+        ABL["ablation.py<br/>delete edge i-j,<br/>predict again"]
+        INDEX["index.py<br/>heavy edge, or decoration?"]
+        VALID["validation.py<br/>AUROC against the<br/>known synthetic graph"]
+    end
+
+    subgraph METRICS["src/metrics/"]
+        ACC["accuracy.py<br/>ADE and FDE"]
+        COLL["collision.py<br/>how often the paths touch"]
+        CAL["calibration.py<br/>ECE. is the model honest<br/>about its own doubt?"]
+    end
+
+    subgraph STATS["src/stats/"]
+        BOOT["bootstrap.py<br/>resample by SCENE,<br/>not by agent"]
+        TESTS["tests.py<br/>H1 to H4"]
+    end
+
+    subgraph EDA["src/eda/"]
+        SUMM["summary.py<br/>crowd density, step size,<br/>how many windows survive"]
+    end
+
+    NB["capstone.ipynb<br/>THE ONE NOTEBOOK.<br/>calls, plots, writes up.<br/>no logic lives here"]
+
+    Q --> SCRIPTS
+    DL --> LOADER
+    LOADER --> WINDOWS
+    SYNTH --> WINDOWS
+    WINDOWS --> SUMM
+    WINDOWS --> BASE
+    AFSET --> EXTRACT
+    EXTRACT --> CACHED
+
+    BASE -.-> CV
+    BASE -.-> EKF
+    BASE -.-> MOCK
+    BASE -.-> CACHED
+    BASE -.-> AF
+
+    AF --> GRAPH
+    CACHED --> GRAPH
+    GRAPH --> ABL
+    ABL --> INDEX
+    INDEX --> VALID
+    SYNTH -. ground truth .-> VALID
+
+    CV --> ACC
+    EKF --> ACC
+    AF --> ACC
+    ACC --> BOOT
+    COLL --> BOOT
+    CAL --> BOOT
+    INDEX --> BOOT
+    BOOT --> TESTS
+
+    TESTS --> NB
+    VALID --> NB
+    SUMM --> NB
+
+    classDef swap fill:#ffe9c7,stroke:#c77b00,stroke-width:2px
+    classDef core fill:#dfe9ff,stroke:#2b5fb0,stroke-width:2px
+    classDef out fill:#e6f5e0,stroke:#3f8f2f,stroke-width:2px
+    class AF swap
+    class GRAPH,ABL,INDEX,VALID core
+    class NB,Q out
