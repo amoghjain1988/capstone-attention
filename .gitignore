@@ -1,0 +1,12 @@
+# Anchor every path with a leading slash. A bare "data/" also matches
+# "src/data/", which would silently drop the whole data pipeline.
+/data/
+/checkpoints/
+/outputs/
+/third_party/
+/.venv/
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/

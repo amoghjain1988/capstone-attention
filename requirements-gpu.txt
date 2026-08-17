@@ -1,0 +1,33 @@
+# The extra packages for the AgentFormer stages. 
+# Done Already! and Cache is there!
+#
+# Install order matters, because PyTorch comes from its own index.
+#
+#   uv pip install --python .venv/Scripts/python.exe -r requirements.txt
+#   uv pip install --python .venv/Scripts/python.exe torch --index-url https://download.pytorch.org/whl/cu128
+#   uv pip install --python .venv/Scripts/python.exe -r requirements-gpu.txt
+#
+# WHY NOT PyTorch 1.8, WHICH AgentFormer PINS
+# An RTX 50 series card is compute capability 12.0. PyTorch 1.8 ships CUDA 10.2
+# and 11.1 kernels, which stop at 8.6, so it cannot run on that card at all.
+# PyTorch 1.8 also has no wheel above Python 3.9. We therefore run PyTorch 2.x
+# and repair three small breakages in scripts/setup_agentformer.py.
+#
+# Tested on Windows 11, Python 3.12.13, torch 2.11.0+cu128, driver 591.86,
+# on an RTX 5080 (sm_120).
+#
+# CHOOSE THE INDEX THAT MATCHES YOUR CARD
+#   RTX 50 series (sm_120)   cu128 or later. Nothing older works.
+#   RTX 30 and 40 series     cu121 or cu128
+#   No GPU                   the default index gives the CPU build
+
+# AgentFormer's own dependencies, minus the ones we never reach.
+# nuscenes-devkit and tensorboard are for their nuScenes path and their
+# training loop. We only run inference on ETH and UCY, so we skip both.
+pyyaml>=6.0
+easydict>=1.13
+glob2>=0.7
+opencv-python>=4.8
+
+# The checkpoint archive lives on Google Drive.
+gdown>=5.0
