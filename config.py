@@ -47,7 +47,7 @@ WINDOW_LEN = N_HIST + N_FUT  # 20 frames
 # A stride of 1 gives every possible window. The windows then overlap heavily.
 # src/eda/overlap.py reports the design effect for each stride.
 # Freeze this number in design.py, before the first ablation run.
-WINDOW_STRIDE = 1
+WINDOW_STRIDE = 5  # Changed by prem from 1 to 5
 
 # ---------------------------------------------------------------------------
 # Model
@@ -73,8 +73,8 @@ N_PERM = 10_000
 
 # Fill these two after the exploratory analysis and before the first ablation.
 # src/eda/overlap.py gives the design effect that src/hypotheses/design.py needs.
-MINIMUM_EFFECT = None
-POWER = None
+MINIMUM_EFFECT = 0.592 #changed by prem from none to 0.592
+POWER = 0.80 #changed by prem from none to 0.80
 
 # ---------------------------------------------------------------------------
 # Geometry
