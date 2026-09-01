@@ -45,6 +45,29 @@ def toy() -> pd.DataFrame:
 
 
 @pytest.fixture(scope="module")
+def toy_three() -> pd.DataFrame:
+    """Return a hand-made scene that holds windows of two and of three agents.
+
+    Agent 1 and agent 2 are present in frames 0 to 29, so they join every
+    window. Agent 3 is present in frames 0 to 19 only, so agent 3 joins the
+    window at t0 of 0 and no other window.
+
+    The scene therefore gives one window of three agents and ten windows of two
+    agents. The eligibility rule keeps the first and drops the rest, so both
+    sides of the rule carry a test.
+    """
+    rows = []
+    for frame in range(30):
+        rows.append(("eth", frame, 1, 0.5 * frame, 0.0))
+    for frame in range(30):
+        rows.append(("eth", frame, 2, 0.5 * frame, 2.0))
+    for frame in range(20):
+        rows.append(("eth", frame, 3, 0.5 * frame, 4.0))
+    frame_table = pd.DataFrame(rows, columns=["scene", "frame", "agent_id", "x", "y"])
+    return schema.cast(frame_table, "trajectories", partial=True)
+
+
+@pytest.fixture(scope="module")
 def real() -> pd.DataFrame:
     """Return the real trajectories table with the kinematics added."""
     raw = loader_ethucy.load_all(config.RAW_DIR)
@@ -218,10 +241,12 @@ def test_the_ego_pick_is_deterministic(toy):
     assert (joined["ego_id_a"] == joined["ego_id_b"]).all()
 
 
-def test_a_different_seed_can_pick_a_different_ego(toy):
-    frame = windows.make_windows(toy)
+def test_a_different_seed_can_pick_a_different_ego(toy_three):
+    """The pick needs a window of three agents, because a window of two holds
+    too few edges into the ego and carries no ego at all."""
+    frame = windows.make_windows(toy_three)
     a = eligibility.mark_eligible(frame, seed=0)["ego_id"].to_numpy()
-    b = eligibility.mark_eligible(frame, seed=1)["ego_id"].to_numpy()
+    b = eligibility.mark_eligible(frame, seed=7)["ego_id"].to_numpy()
     assert not np.array_equal(a, b)
 
 
@@ -232,10 +257,19 @@ def test_the_ego_belongs_to_the_window(toy):
         assert schema.ego_index(row) < int(row["n_agents"])
 
 
-def test_eligible_means_two_agents_or_more(toy):
-    frame = eligibility.mark_eligible(windows.make_windows(toy))
-    assert (frame["eligible"] == (frame["n_agents"] >= 2)).all()
+def test_eligible_means_enough_edges_into_the_ego(toy_three):
+    """The threshold comes from config.MIN_EGO_EDGES, never from a literal.
+
+    E, the count of edges into the ego, is the agent count minus 1. A window
+    qualifies when E reaches config.MIN_EGO_EDGES.
+    """
+    frame = eligibility.mark_eligible(windows.make_windows(toy_three))
+    edges_into_ego = frame["n_agents"] - 1
+    assert (frame["eligible"] == (edges_into_ego >= config.MIN_EGO_EDGES)).all()
     assert (frame.loc[~frame["eligible"], "ego_id"] == eligibility.NO_EGO).all()
+    # The fixture gives both answers, so neither assertion passes by default.
+    assert frame["eligible"].any()
+    assert not frame["eligible"].all()
 
 
 def test_mark_eligible_never_deletes_a_row(toy):

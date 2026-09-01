@@ -40,7 +40,29 @@ def order_edges(edges: pd.DataFrame, arm: str, seed: int) -> list[int]:
             "target_mass instead."
         )
 
-    table = edges[["src", "attn", "rank_dist"]].copy()
+    # Only the nearest arm reads rank_dist. Ask for it inside that branch, so
+    # the other four arms run on the attention table that extract_attention.py
+    # writes today. See CONTRACT.md section 3, attention_edges.
+    if arm == "nearest":
+        if "rank_dist" not in edges.columns:
+            raise KeyError(
+                "the nearest arm needs a rank_dist column. "
+                "src/features/proximity.py writes it. See CONTRACT.md section 3."
+            )
+        near = edges[["src", "rank_dist"]].copy()
+        near["src"] = near["src"].astype(int)
+        if near["rank_dist"].isna().any():
+            # A stable sort puts NaN last and leaves the rest in row order, so a
+            # partial rank_dist silently turns the distance order into the row
+            # order. Refuse instead, and let the caller log the window.
+            raise ValueError(
+                "the nearest arm reads a null rank_dist. This window gives no "
+                "distance order."
+            )
+        ordered = near.sort_values(["rank_dist", "src"], ascending=[True, True], kind="stable")
+        return [int(src) for src in ordered["src"]]
+
+    table = edges[["src", "attn"]].copy()
     table["src"] = table["src"].astype(int)
 
     if arm == "morf":
@@ -48,9 +70,6 @@ def order_edges(edges: pd.DataFrame, arm: str, seed: int) -> list[int]:
         return [int(src) for src in ordered["src"]]
     if arm == "lerf":
         ordered = table.sort_values(["attn", "src"], ascending=[True, True], kind="stable")
-        return [int(src) for src in ordered["src"]]
-    if arm == "nearest":
-        ordered = table.sort_values(["rank_dist", "src"], ascending=[True, True], kind="stable")
         return [int(src) for src in ordered["src"]]
 
     # arm == "random"

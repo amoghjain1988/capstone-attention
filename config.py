@@ -71,6 +71,35 @@ PRIMARY_N_REMOVED = 1
 N_BOOT = 10_000
 N_PERM = 10_000
 
+# The cluster unit for every permutation test and every bootstrap.
+#
+# A pedestrian repeats across windows and a time block holds overlapping
+# windows. Both hold real dependence. The two units CROSS: 37 percent of the
+# pedestrians appear in more than one time block, so neither unit nests inside
+# the other. A test that clusters on one unit alone leaks the dependence of the
+# other unit into the p value.
+#
+# A pilot of 2,418 real windows measures the effect. The variance of
+# D = shift(MoRF) - shift(LeRF) splits 47 percent to the pedestrian, 20 percent
+# to the time block and 33 percent to the residual. A simulation under the null,
+# with that same crossed dependence, gives these false positive rates against a
+# target of 0.05:
+#
+#   no cluster unit      0.245
+#   pedestrian           0.085
+#   time block           0.115
+#   connected component  0.030   <- the only unit that holds the rate
+#   scene                0.020   safe, but it loses half the power
+#
+# The connected component is the coarsest unit that respects both. Build the
+# bipartite graph of pedestrians against time blocks, then take the connected
+# component of each window. The pilot gives 39 components, and the test keeps
+# 0.875 power against a true shift of 0.03 m.
+#
+# Report n_clusters beside every p value. The honest number is the component
+# count, not the window count.
+CLUSTER_UNIT = "component"
+
 # Fill these two after the exploratory analysis and before the first ablation.
 # src/eda/overlap.py gives the design effect that src/hypotheses/design.py needs.
 MINIMUM_EFFECT = 0.592 #changed by prem from none to 0.592

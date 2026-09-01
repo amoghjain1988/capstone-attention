@@ -23,7 +23,13 @@ import config
 from src.data import schema
 
 NO_EGO = -1
-MIN_AGENTS = 2  # one ego and one neighbour
+
+# A window needs one ego plus config.MIN_EGO_EDGES neighbours.
+# E, the count of edges into the ego, is the agent count minus 1, so the agent
+# count must reach MIN_EGO_EDGES + 1. config.py states why the rule is 2 and
+# not 1: at E of 1 every arm picks the same edge, so H1 and H2 give a difference
+# of 0 by construction and the faithfulness index is NaN.
+MIN_AGENTS = config.MIN_EGO_EDGES + 1
 
 
 def _generator(window_key: str, seed: int) -> np.random.Generator:
@@ -35,8 +41,9 @@ def _generator(window_key: str, seed: int) -> np.random.Generator:
 def pick_ego(window_row: pd.Series, seed: int = config.SEED) -> int:
     """Return the ego agent_id of one window.
 
-    Return NO_EGO when the window holds fewer than two agents. Such a window
-    has no interaction to explain, so it carries no ego.
+    Return NO_EGO when the window holds fewer than MIN_AGENTS agents. Such a
+    window carries too few edges into the ego to inform any primary test, so it
+    carries no ego.
     """
     order = [int(a) for a in window_row["agent_order"]]
     if len(order) < MIN_AGENTS:
