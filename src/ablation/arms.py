@@ -10,6 +10,7 @@ order.
 
 from __future__ import annotations
 
+import hashlib
 import warnings
 
 import numpy as np
@@ -18,13 +19,22 @@ import pandas as pd
 ARMS = ("morf", "lerf", "weight_matched", "nearest", "random", "single")
 
 
-def order_edges(edges: pd.DataFrame, arm: str, seed: int) -> list[int]:
+def order_edges(edges: pd.DataFrame, arm: str, seed: int, window_id: str) -> list[int]:
     """Return src ids, in the order this arm removes them.
 
     `morf` removes the strongest attention first. `lerf` removes the weakest
     attention first. `nearest` removes the closest neighbour first, by
-    `rank_dist`. `random` shuffles with `np.random.default_rng(seed)`, so the
-    same seed always gives the same order.
+    `rank_dist`. `random` shuffles with a generator seeded from `seed` AND
+    `window_id` together, the same way `src/data/eligibility.py` seeds the
+    ego pick of every window. Two windows with the same edge count therefore
+    get two different random orders, even under the same `seed`.
+
+    Before this change, `random` seeded from `seed` alone. Every window with
+    the same edge count then received the identical positional order, so the
+    random arm was not actually random across windows and could not serve as
+    a real control. `window_id` only matters to the `random` branch. Every
+    other arm ignores it, but this function asks every caller for it, so a
+    caller cannot forget it only on the one call where it counts.
 
     `single` raises. It is not an order: the caller sweeps each edge alone.
     `weight_matched` raises here too. It has no fixed order. Call
@@ -72,8 +82,12 @@ def order_edges(edges: pd.DataFrame, arm: str, seed: int) -> list[int]:
         ordered = table.sort_values(["attn", "src"], ascending=[True, True], kind="stable")
         return [int(src) for src in ordered["src"]]
 
-    # arm == "random"
-    rng = np.random.default_rng(seed)
+    # arm == "random". Seed from seed AND window_id together, the same way
+    # src/data/eligibility.py seeds its own generator, so the pick does not
+    # depend on row order, does not change between runs, and does not repeat
+    # across two different windows that happen to share an edge count.
+    digest = hashlib.sha256(f"{int(seed)}:{window_id}".encode("utf-8")).digest()
+    rng = np.random.default_rng(int.from_bytes(digest[:8], "big"))
     base = table.sort_values("src", kind="stable")["src"].to_numpy()
     shuffled = rng.permutation(base)
     return [int(src) for src in shuffled]
