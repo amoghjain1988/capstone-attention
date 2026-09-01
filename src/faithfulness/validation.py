@@ -68,6 +68,12 @@ class PlantedPredictor:
     Deterministic: draws changes nothing, matching the released AgentFormer.
     """
 
+    # Calibrated for the attention() method below, not for _simulate. See
+    # that method's docstring for what these two numbers are doing and why
+    # neither one is allowed to make attention a perfect oracle.
+    ATTENTION_TEMPERATURE = 1.0
+    INFLUENCE_BOOST = 64.0
+
     def __init__(
         self,
         influence: np.ndarray,
@@ -131,3 +137,56 @@ class PlantedPredictor:
             position = position + velocity * self.dt
             path[:, step, :] = position
         return path
+
+    def attention(self, hist: np.ndarray) -> dict[str, np.ndarray]:
+        """Return module -> (N*n_hist, N*n_hist). Every row sums to 1.
+
+        PlantedPredictor has no attention of its own: `predict` only ever
+        consults `self.influence`, gated hard, inside `_simulate`. This
+        method exists only because tests/test_synthetic.py needs a genuine
+        attention-shaped signal to carry through
+        src/attention/aggregate.py `collapse()` and
+        src/attention/rank.py `rank_edges()`, the same two functions the real
+        pipeline calls on AgentFormer's own attention. Without a real
+        `attention()` here, that pipeline could never be exercised by the
+        gate at all.
+
+        The weight starts from the same geometric rule `src/models/mock.py`
+        uses for `MockPredictor`: it falls with distance at the last
+        observed frame. On its own this rule is USELESS here, because
+        `src/data/synthetic.py` plants real influence uniformly at random,
+        independent of geometry: a purely geometric score against this scene
+        scores close to a coin flip. A real edge therefore adds a fixed
+        bonus, `INFLUENCE_BOOST`, to that neighbour's logit before the
+        softmax.
+
+        `INFLUENCE_BOOST` is calibrated so real influence usually beats
+        ordinary distance noise, but not always: at short range a nearby
+        fake neighbour can still outrank a distant real one. This
+        imperfection is deliberate, not a defect to remove. A signal that
+        separated real from fake edges with certainty would prove nothing
+        about the gate, for the same reason the shift-based version this
+        method replaces proved nothing: either one would pass however
+        `collapse` and `rank_edges` wired the ids together, even wired
+        backwards. `tests/test_synthetic.py::test_a_reversed_ranking_fails_the_gate`
+        is the test that checks this method's signal is not that trivial.
+        """
+        n_hist = int(np.asarray(hist).shape[1])
+        hist = base.check_history(hist, n_hist)
+        n_agents = int(hist.shape[0])
+
+        delta = hist[:, -1, None, :] - hist[None, :, -1, :]
+        distance = np.linalg.norm(delta, axis=-1)
+        distance = np.clip(distance, synthetic.MIN_RANGE_M, None)
+
+        logit = -distance / self.ATTENTION_TEMPERATURE
+        logit = logit + np.where(self.influence, self.INFLUENCE_BOOST, 0.0)
+        np.fill_diagonal(logit, -np.inf)
+        weight = np.exp(logit - logit.max(axis=1, keepdims=True))
+        weight = weight / weight.sum(axis=1, keepdims=True)
+
+        # Spread each agent pair evenly over its own n_hist by n_hist time
+        # block, so the token map is agent-major and every row still sums to
+        # 1, matching MockPredictor.attention.
+        token = np.repeat(np.repeat(weight, n_hist, axis=0), n_hist, axis=1) / n_hist
+        return {name: token.copy() for name in config.MODULES}
