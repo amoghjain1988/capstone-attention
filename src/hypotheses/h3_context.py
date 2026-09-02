@@ -2,7 +2,7 @@
 
 See CONTRACT.md section 5.10 for the signature. CONTRACT.md pins the model
 (`FI_i = b0 + b . context + scene fixed effects`, one joint test of every
-coefficient) but not the exact fitting code. The choices below -- the joint
+coefficient) but not the exact regression code. The choices below -- the joint
 Wald test, the partial R squared as a scene-only-vs-full comparison, and the
 variance inflation factor as the collinearity check -- are this module's own
 design. Confirm them with the team before a p value from this module appears
@@ -26,7 +26,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 import config
 from src.data import schema
 
-# The four raw covariates this module regresses on, before z-scoring.
+# The four raw covariates this module regresses on, before the z-score.
 # density and n_agents come from src/features/context.py, one row per
 # window. closing_speed and inv_ttc come from src/features/kinematics.py and
 # must already be reduced to one value per window before they reach this
@@ -43,9 +43,10 @@ CONTEXT_COLUMNS = ("density", "n_agents", "closing_speed", "inv_ttc")
 # context.
 TWO_EDGE_TRAP = config.MIN_EGO_EDGES
 
-# Which of the two fits (see run()) this module treats as primary. Dropping
-# the 2-edge windows removes a spike that is a property of E == 2, not of
-# context, so it is the headline. Report both; state which one is which.
+# Which of the two fits (see run()) this module treats as primary. The fit
+# without the 2-edge windows is the headline: those windows add a spike
+# that is a property of E == 2, not of context. Report both; state which
+# one is which.
 HEADLINE_DROPS_TWO_EDGE = True
 
 
@@ -84,9 +85,12 @@ def _fit_one(table: pd.DataFrame, clusters: np.ndarray) -> dict:
     Returns n, n_clusters, the coefficient table, the joint Wald test of
     every non-intercept term (context and scene both), the partial R
     squared of the context block over a scene-only model, and the
-    collinearity check.
+    collinearity check. Checks collinearity FIRST, before it fits anything:
+    a design matrix with a near-redundant covariate can make the fit and
+    the joint test unreliable, so the check must run before either.
     """
     scored = _zscore(table, CONTEXT_COLUMNS)
+    vif = check_collinearity(scored[list(CONTEXT_COLUMNS)])
 
     formula = "fi ~ " + " + ".join(CONTEXT_COLUMNS) + " + C(scene)"
     full = smf.ols(formula, data=scored).fit(
@@ -121,7 +125,7 @@ def _fit_one(table: pd.DataFrame, clusters: np.ndarray) -> dict:
         "joint_statistic": float(joint.statistic),
         "joint_p": float(joint.pvalue),
         "partial_r2": partial_r2,
-        "vif": check_collinearity(scored[list(CONTEXT_COLUMNS)]),
+        "vif": vif,
     }
 
 
@@ -131,9 +135,9 @@ def run(fi: pd.DataFrame, context: pd.DataFrame, cfg) -> dict:
     `fi` matches schema.FAITHFULNESS: window_id, ego_id, n_edges, floor,
     ceiling, fi. `context` carries one row per window_id with the four raw
     covariates named in CONTEXT_COLUMNS, already reduced to one row per
-    window -- build it by joining src/features/context.py's window-level
-    output with a per-window reduction of src/features/kinematics.py, not
-    passed here.
+    window. Build it by a join of src/features/context.py's window-level
+    output with a per-window reduction of src/features/kinematics.py; this
+    function does not build that join itself.
 
     Rows where `fi` is null (ceiling == floor, an undefined index) are
     dropped before anything is fit. The four covariates are z-scored on the

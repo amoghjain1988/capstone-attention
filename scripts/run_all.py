@@ -145,7 +145,7 @@ def stage_predictions() -> None:
 
     This needs the GPU cache under data/interim (scripts/extract_attention.py's
     output), not a GPU itself. Print a clear note and return when that cache
-    is not on disk yet, instead of failing the whole run.
+    is not on disk yet. The stage does not fail the whole run.
     """
     banner("STAGE 8  src/metrics (predictions and calibration)")
     if not any(config.INTERIM_DIR.glob("attention_*.parquet")):

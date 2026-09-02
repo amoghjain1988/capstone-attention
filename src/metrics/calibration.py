@@ -35,10 +35,10 @@ from src.data import schema
 from src.metrics import accuracy, collision
 
 # K draws give K + 1 possible ranks (a truth can sit anywhere from closest
-# to farthest among the draws, inclusive). Binning into fewer than K + 1 bins
-# packs a different count of ranks into different bins, so even a perfectly
-# uniform rank vector shows a sawtooth. Use K + 1 bins so every rank owns
-# exactly one bin.
+# to farthest among the draws, inclusive). A bin count below K + 1 packs a
+# different count of ranks into different bins, so even a perfectly uniform
+# rank vector shows a sawtooth. Use K + 1 bins so every rank owns exactly
+# one bin.
 N_PIT_BINS = config.N_SAMPLES + 1
 
 
@@ -68,12 +68,12 @@ def coverage(pred: np.ndarray, truth: np.ndarray, level: float = 0.90) -> float:
     Uses the rank among K + 1 method, not the raw quantile of the K draws.
     The K draws and the truth are K + 1 exchangeable points under a
     calibrated ensemble, so this function ranks the truth's distance from
-    the centroid among the K draws' distances, giving an integer rank in
-    0 .. K, and calls the step covered when that rank falls in the smallest
-    `level` share of the K + 1 slots. Taking the quantile of the K draws
-    alone, with no K + 1 correction, is biased at small K: a perfectly
-    calibrated K = 20 ensemble scores 0.833 against a nominal level of 0.90
-    under that estimator, not 0.90.
+    the centroid among the K draws' distances. The result is an integer
+    rank in 0 .. K. The step counts as covered when that rank falls in the
+    smallest `level` share of the K + 1 slots. The raw quantile of the K
+    draws alone, with no K + 1 correction, is biased at small K: a
+    perfectly calibrated K = 20 ensemble scores 0.833 against a nominal
+    level of 0.90 under that estimator, not 0.90.
     """
     draw_dist, truth_dist = _step_stats(pred, truth)
     n_draws = draw_dist.shape[0]

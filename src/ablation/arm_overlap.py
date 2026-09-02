@@ -38,7 +38,7 @@ def _order(block: pd.DataFrame, rank_column: str) -> list[int]:
 
     Raise KeyError when rank_column is absent. Raise ValueError when it
     holds a null. sort_values places a null last and is a stable sort, so a
-    partial rank_column would silently fall back to the incoming row order
+    partial rank_column would silently fall back to the original row order
     for the null rows, and the window would then score a Jaccard overlap of
     1.0 or 0.0 on that row order alone, not on the real ranking.
     src/ablation/arms.py applies the same guard to rank_dist inside

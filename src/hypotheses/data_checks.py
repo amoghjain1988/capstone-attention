@@ -28,15 +28,16 @@ def check(df: pd.DataFrame) -> pd.DataFrame:
     A window is complete when it carries every arm of REQUIRED_ARMS at
     config.PRIMARY_N_REMOVED and config.PRIMARY_MASK_POLICY, each with a
     non-null shift. A zero difference between two arms is real data, not a
-    gap: this function never drops a row for holding a zero shift, and the
-    Pratt rule (src/stats/effects.rank_biserial) is what handles a zero
-    difference downstream, not this function.
+    gap: this function never drops a row that holds a zero shift. The Pratt
+    rule (src/stats/effects.rank_biserial) handles a zero difference
+    downstream; this function does not.
 
     Returns the attrition table on success: one row per scene, with the
     window count and the complete count. Every eligible window is computed
     by the team's own ablation stage, so a missing arm or a null shift is a
-    pipeline bug, not a natural data gap. Raise ValueError, naming the first
-    incomplete window, instead of returning a table that hides the bug.
+    pipeline bug, not a natural data gap. Raise ValueError instead, with the
+    first incomplete window in the message. Do not return a table that
+    hides the bug.
     """
     if "window_id" not in df.columns:
         raise KeyError("df must carry a window_id column")
