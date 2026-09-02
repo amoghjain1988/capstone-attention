@@ -45,15 +45,27 @@ N_FRAMES = 200
 SEED = 0
 N_REAL = 2
 
+# Amogh's second review, Check 3: one seed is not evidence that the gate
+# reliably works, only that it works once. These are 5 independently planted
+# scenes -- a different influence graph and a different simulated walk each
+# time -- so the two tests near the bottom of this file can report every
+# AUROC across several seeds, not just SEED.
+GATE_SEEDS = (0, 1, 2, 3, 4)
 
-def _eligible_windows() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (eligible windows, true_edges) of the one planted scene every
-    test in this file shares."""
+
+def _eligible_windows(seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return (eligible windows, true_edges) of one planted scene.
+
+    `seed` picks which planted scene: it feeds both the influence graph
+    (`synthetic.make_scene`) and the window eligibility draw
+    (`eligibility.mark_eligible`), so two different seeds give two genuinely
+    different scenes, not the same scene read twice.
+    """
     traj, true_edges = synthetic.make_scene(
-        n_agents=N_AGENTS, n_frames=N_FRAMES, seed=SEED, n_real=N_REAL
+        n_agents=N_AGENTS, n_frames=N_FRAMES, seed=seed, n_real=N_REAL
     )
     frame = windows.make_windows(traj, config.N_HIST, config.N_FUT, config.WINDOW_STRIDE)
-    frame = eligibility.mark_eligible(frame, SEED)
+    frame = eligibility.mark_eligible(frame, seed)
     eligible = frame.loc[frame["eligible"]]
     assert len(eligible) > 0, "the planted scene built no eligible window"
     return eligible, true_edges
@@ -64,17 +76,20 @@ def _eligible_windows() -> tuple[pd.DataFrame, pd.DataFrame]:
 # ---------------------------------------------------------------------------
 
 
-def _attention_scores(rank_fn=rank.rank_edges) -> tuple[np.ndarray, np.ndarray]:
+def _attention_scores(
+    seed: int = SEED, rank_fn=rank.rank_edges
+) -> tuple[np.ndarray, np.ndarray]:
     """Run PlantedPredictor's attention through collapse() and rank_fn on
-    every eligible window of the planted scene.
+    every eligible window of one planted scene.
 
     Return (attn, is_real), one entry per edge, pooled across every window.
-    `rank_fn` defaults to the real rank_edges. Passing a broken stand-in,
-    the way test_a_reversed_ranking_fails_the_gate does, proves this
-    function's result actually depends on ranking the ids correctly.
+    `seed` picks the planted scene, see _eligible_windows. `rank_fn` defaults
+    to the real rank_edges. Passing a broken stand-in, the way
+    test_a_reversed_ranking_fails_the_gate does, proves this function's
+    result actually depends on ranking the ids correctly.
     """
-    eligible, true_edges = _eligible_windows()
-    influence = synthetic.influence_matrix(n_agents=N_AGENTS, seed=SEED, n_real=N_REAL)
+    eligible, true_edges = _eligible_windows(seed)
+    influence = synthetic.influence_matrix(n_agents=N_AGENTS, seed=seed, n_real=N_REAL)
     model = PlantedPredictor(influence)
 
     all_attn: list[float] = []
@@ -147,6 +162,34 @@ def test_a_reversed_ranking_fails_the_gate():
     auroc = auroc_against_truth(attn, is_real)
     print(f"\nreversed-ranking AUROC: {auroc:.4f}")
     assert auroc < 0.9
+
+
+def test_the_gate_clears_point_nine_across_several_seeds():
+    """One seed proves the gate can pass. It does not prove the gate
+    reliably passes. This test plants 5 independent scenes -- a different
+    influence graph and a different simulated walk each time, see
+    GATE_SEEDS -- and requires every one of them to clear AUROC 0.9."""
+    results = {}
+    for seed in GATE_SEEDS:
+        attn, is_real = _attention_scores(seed=seed)
+        results[seed] = auroc_against_truth(attn, is_real)
+    for seed, auroc in results.items():
+        print(f"\ngate AUROC (seed={seed}): {auroc:.4f}")
+    failing = {seed: auroc for seed, auroc in results.items() if auroc <= 0.9}
+    assert not failing, f"these seeds did not clear 0.9: {failing}"
+
+
+def test_a_reversed_ranking_fails_the_gate_across_several_seeds():
+    """The negative control, repeated across the same 5 seeds: a reversed
+    ranking must fail the gate every time, not just once."""
+    results = {}
+    for seed in GATE_SEEDS:
+        attn, is_real = _attention_scores(seed=seed, rank_fn=_reversed_rank_edges)
+        results[seed] = auroc_against_truth(attn, is_real)
+    for seed, auroc in results.items():
+        print(f"\nreversed-ranking AUROC (seed={seed}): {auroc:.4f}")
+    failing = {seed: auroc for seed, auroc in results.items() if auroc >= 0.9}
+    assert not failing, f"these seeds did not fail the gate: {failing}"
 
 
 # ---------------------------------------------------------------------------

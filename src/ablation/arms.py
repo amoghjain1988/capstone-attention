@@ -2,10 +2,10 @@
 
 See CONTRACT.md section 5.7 for the signatures.
 
-`edges` is the per-window edge table with `src`, `attn`, and `rank_dist`
-columns. `order_edges` returns `src` ids in removal order. Ties always break
-by the LOWER `src` id, so every call with the same input gives the same
-order.
+`edges` is the per-window edge table with `src`, `attn`, `rank_dist`, and
+`window_id` columns. `order_edges` returns `src` ids in removal order. Ties
+always break by the LOWER `src` id, so every call with the same input gives
+the same order.
 """
 
 from __future__ import annotations
@@ -19,22 +19,29 @@ import pandas as pd
 ARMS = ("morf", "lerf", "weight_matched", "nearest", "random", "single")
 
 
-def order_edges(edges: pd.DataFrame, arm: str, seed: int, window_id: str) -> list[int]:
+def order_edges(edges: pd.DataFrame, arm: str, seed: int) -> list[int]:
     """Return src ids, in the order this arm removes them.
 
     `morf` removes the strongest attention first. `lerf` removes the weakest
     attention first. `nearest` removes the closest neighbour first, by
     `rank_dist`. `random` shuffles with a generator seeded from `seed` AND
-    `window_id` together, the same way `src/data/eligibility.py` seeds the
-    ego pick of every window. Two windows with the same edge count therefore
-    get two different random orders, even under the same `seed`.
+    this window's own `window_id`, read from `edges["window_id"]`, the same
+    way `src/data/eligibility.py` seeds the ego pick of every window. Two
+    windows with the same edge count therefore get two different random
+    orders, even under the same `seed`. `edges` must hold exactly one
+    `window_id` value: it is the per-window slice of the `attention_edges`
+    table CONTRACT.md section 3 defines, never rows from more than one
+    window at once.
 
     Before this change, `random` seeded from `seed` alone. Every window with
     the same edge count then received the identical positional order, so the
     random arm was not actually random across windows and could not serve as
-    a real control. `window_id` only matters to the `random` branch. Every
-    other arm ignores it, but this function asks every caller for it, so a
-    caller cannot forget it only on the one call where it counts.
+    a real control. `window_id` only matters to the `random` branch. This
+    function reads it out of the `edges` frame it already receives, rather
+    than taking it as a fourth argument, so CONTRACT.md section 5.7's
+    three-argument signature `order_edges(edges, arm, seed)` stays exactly as
+    written, and the 4 call sites this function already has do not need a
+    new argument threaded through them.
 
     `single` raises. It is not an order: the caller sweeps each edge alone.
     `weight_matched` raises here too. It has no fixed order. Call
@@ -82,10 +89,24 @@ def order_edges(edges: pd.DataFrame, arm: str, seed: int, window_id: str) -> lis
         ordered = table.sort_values(["attn", "src"], ascending=[True, True], kind="stable")
         return [int(src) for src in ordered["src"]]
 
-    # arm == "random". Seed from seed AND window_id together, the same way
-    # src/data/eligibility.py seeds its own generator, so the pick does not
-    # depend on row order, does not change between runs, and does not repeat
-    # across two different windows that happen to share an edge count.
+    # arm == "random". Seed from seed AND this window's own window_id, read
+    # from the edges frame, the same way src/data/eligibility.py seeds its
+    # own generator, so the pick does not depend on row order, does not
+    # change between runs, and does not repeat across two different windows
+    # that happen to share an edge count.
+    if "window_id" not in edges.columns:
+        raise KeyError(
+            "the random arm needs a window_id column. edges must be one "
+            "window's slice of attention_edges. See CONTRACT.md section 3."
+        )
+    window_ids = edges["window_id"].unique()
+    if len(window_ids) != 1:
+        raise ValueError(
+            f"edges must hold exactly one window_id, it holds "
+            f"{len(window_ids)}: {sorted(str(w) for w in window_ids)}"
+        )
+    window_id = window_ids[0]
+
     digest = hashlib.sha256(f"{int(seed)}:{window_id}".encode("utf-8")).digest()
     rng = np.random.default_rng(int.from_bytes(digest[:8], "big"))
     base = table.sort_values("src", kind="stable")["src"].to_numpy()

@@ -111,7 +111,7 @@ def curve(
         return pd.DataFrame(rows)
 
     if arm == "weight_matched":
-        morf_order = order_edges(edges, "morf", seed, window_id)
+        morf_order = order_edges(edges, "morf", seed)
         cumulative = 0.0
         previous: list[int] | None = None
         for src in morf_order:
@@ -124,7 +124,7 @@ def curve(
             add_row(len(chosen), removed_mass, -1, chosen)
         return pd.DataFrame(rows)
 
-    order = order_edges(edges, arm, seed, window_id)
+    order = order_edges(edges, arm, seed)
     cumulative = 0.0
     for step, src in enumerate(order, start=1):
         cumulative += attn_by_src[src]

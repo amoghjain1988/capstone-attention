@@ -81,3 +81,52 @@ def test_benjamini_hochberg_is_at_least_as_lenient_as_holm(pvals):
     bh_adjusted = benjamini_hochberg(pvals)
     for key in pvals:
         assert bh_adjusted[key] <= holm_adjusted[key] + 1e-12
+
+
+# ---------------------------------------------------------------------------
+# Amogh's second review, Check 4: a tie case and an all-null case, on top of
+# the worked example above.
+# ---------------------------------------------------------------------------
+
+
+def test_holm_gives_a_tied_pair_the_same_adjusted_value():
+    """"a" and "b" start with the identical raw p-value. sorted() breaks the
+    tie by insertion order, so one of them lands at rank 1 and the other at
+    rank 2 -- but the running MAXIMUM must still pull the rank-1 value up to
+    match rank-2's, so a tie in the input stays a tie in the output,
+    whichever key sorted() happened to place first.
+
+    By hand, m=3, sorted ascending (a, b, c), all reading raw=0.02 for the
+    tied pair: rank1 (3-1+1)*0.02=0.06, running max 0.06; rank2
+    (3-2+1)*0.02=0.04, running max stays 0.06; rank3 (3-3+1)*0.10=0.10,
+    running max 0.10.
+    """
+    adjusted = holm({"a": 0.02, "b": 0.02, "c": 0.10})
+    assert adjusted["a"] == pytest.approx(adjusted["b"])
+    assert adjusted["a"] == pytest.approx(0.06)
+    assert adjusted["c"] == pytest.approx(0.10)
+
+
+def test_benjamini_hochberg_gives_a_tied_pair_the_same_adjusted_value():
+    """Same tie, the BH rule. By hand, m=3, from the largest rank down:
+    rank3 (c) 0.10*3/3=0.10, running min 0.10; rank2 (one of the tied pair)
+    0.02*3/2=0.03, running min drops to 0.03; rank1 (the other tied value)
+    0.02*3/1=0.06, running min stays 0.03. Both tied keys land at 0.03."""
+    adjusted = benjamini_hochberg({"a": 0.02, "b": 0.02, "c": 0.10})
+    assert adjusted["a"] == pytest.approx(adjusted["b"])
+    assert adjusted["a"] == pytest.approx(0.03)
+    assert adjusted["c"] == pytest.approx(0.10)
+
+
+def test_holm_leaves_an_all_null_family_at_the_ceiling():
+    """Every hypothesis in this family already reads a raw p-value of 1.0 --
+    the family where nothing is significant anywhere. Correction must never
+    invent significance: every adjusted value stays pinned at the 1.0
+    ceiling, for every key."""
+    adjusted = holm({"a": 1.0, "b": 1.0, "c": 1.0})
+    assert adjusted == {"a": 1.0, "b": 1.0, "c": 1.0}
+
+
+def test_benjamini_hochberg_leaves_an_all_null_family_at_the_ceiling():
+    adjusted = benjamini_hochberg({"a": 1.0, "b": 1.0, "c": 1.0})
+    assert adjusted == {"a": 1.0, "b": 1.0, "c": 1.0}
