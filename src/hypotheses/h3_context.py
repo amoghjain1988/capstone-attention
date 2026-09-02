@@ -23,6 +23,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+import config
 from src.data import schema
 
 # The four raw covariates this module regresses on, before z-scoring.
@@ -32,7 +33,7 @@ from src.data import schema
 # module -- run() does not reduce them itself, so it does not guess how.
 CONTEXT_COLUMNS = ("density", "n_agents", "closing_speed", "inv_ttc")
 
-# THE TRAP. A window with exactly this many edges into the ego gives a
+# THE TRAP. A window at the frozen floor of config.MIN_EGO_EDGES gives a
 # faithfulness index of exactly +1 or -1: the floor is the mean of 2 shifts
 # and the ceiling is their max, so FI has only two reachable values, never a
 # middle one. Those windows are about 12 percent of the sample and 78
@@ -40,7 +41,7 @@ CONTEXT_COLUMNS = ("density", "n_agents", "closing_speed", "inv_ttc")
 # docs/CATHERINE_AGENT_2.md TASK 7). Mixed in with the continuous FI of
 # windows with more edges, they inject a bimodal spike that does not reflect
 # context.
-TWO_EDGE_TRAP = 2
+TWO_EDGE_TRAP = config.MIN_EGO_EDGES
 
 # Which of the two fits (see run()) this module treats as primary. Dropping
 # the 2-edge windows removes a spike that is a property of E == 2, not of
