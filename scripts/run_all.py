@@ -140,6 +140,41 @@ def stage_not_ready(number: int, name: str, owner: str) -> None:
     print(f"\nSTAGE {number}  {name}: not ready. Owner {owner}. See CONTRACT.md section 7.")
 
 
+def stage_predictions() -> None:
+    """Build data/processed/predictions.parquet and outputs/tables/calibration.csv.
+
+    This needs the GPU cache under data/interim (scripts/extract_attention.py's
+    output), not a GPU itself. Print a clear note and return when that cache
+    is not on disk yet, instead of failing the whole run.
+    """
+    banner("STAGE 8  src/metrics (predictions and calibration)")
+    if not any(config.INTERIM_DIR.glob("attention_*.parquet")):
+        print(
+            f"  no cache under {config.INTERIM_DIR.relative_to(config.ROOT)}. "
+            "Run scripts/extract_attention.py on a GPU machine first, or copy "
+            "the cache folder in, then re-run this stage."
+        )
+        return
+
+    from src.metrics import calibration
+    from src.models.cached import CachedPredictor
+
+    cache = CachedPredictor()
+    print(f"  {cache}")
+
+    predictions = calibration.build_predictions(cache)
+    print(f"  wrote data/processed/predictions.parquet  ({len(predictions):,} rows)")
+
+    calib = calibration.calibration_table(cache)
+    print(f"  wrote outputs/tables/calibration.csv  ({len(calib)} scene rows)")
+    print(
+        "  NOTE the determinism limit: AgentFormer is deterministic and the K "
+        "draws are K fixed DLow modes, not K samples from a posterior. "
+        "coverage and the PIT histogram describe how the K fixed modes sit "
+        "around the truth, not a probabilistic calibration claim."
+    )
+
+
 def main(eda_only: bool = False) -> None:
     """Run the pipeline."""
     config.make_dirs()
@@ -168,7 +203,13 @@ def main(eda_only: bool = False) -> None:
         (5, "config freeze in src/hypotheses/design.py", "P4"),
         (6, "scripts/extract_attention.py and src/attention", "Amogh"),
         (7, "src/ablation", "Amogh"),
-        (8, "src/faithfulness and src/metrics", "P3"),
+    ):
+        stage_not_ready(number, name, owner)
+
+    stage_predictions()
+    stage_not_ready(8, "src/faithfulness (the rest of stage 8)", "P3")
+
+    for number, name, owner in (
         (9, "src/hypotheses and src/stats", "P4"),
         (10, "notebooks/capstone.ipynb", "all"),
     ):

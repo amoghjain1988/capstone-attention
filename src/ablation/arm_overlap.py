@@ -34,7 +34,26 @@ def jaccard(order_a: list[int], order_b: list[int], k: int) -> float:
 
 
 def _order(block: pd.DataFrame, rank_column: str) -> list[int]:
-    """Return the src ids of one window's edges, sorted by the given rank."""
+    """Return the src ids of one window's edges, sorted by the given rank.
+
+    Raise KeyError when rank_column is absent. Raise ValueError when it
+    holds a null. sort_values places a null last and is a stable sort, so a
+    partial rank_column would silently fall back to the incoming row order
+    for the null rows, and the window would then score a Jaccard overlap of
+    1.0 or 0.0 on that row order alone, not on the real ranking.
+    src/ablation/arms.py applies the same guard to rank_dist inside
+    order_edges; this function copies its shape.
+    """
+    if rank_column not in block.columns:
+        raise KeyError(
+            f"the arm_overlap comparison needs a {rank_column!r} column. "
+            "See CONTRACT.md section 3, attention_edges."
+        )
+    if block[rank_column].isna().any():
+        raise ValueError(
+            f"the arm_overlap comparison reads a null {rank_column!r}. "
+            "This window gives no ranking."
+        )
     ordered = block.sort_values(rank_column, kind="mergesort")
     return [int(src) for src in ordered["src"]]
 

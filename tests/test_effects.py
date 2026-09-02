@@ -144,3 +144,40 @@ def test_summary_by_scene_averages_within_a_scene(tmp_path, monkeypatch):
     table = arm_overlap.summary_by_scene(overlap)
     assert set(table["scene"]) == {"eth", "univ"}
     assert (tmp_path / "arm_overlap.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# arm_overlap._order -- a missing or null rank must raise, never guess
+# ---------------------------------------------------------------------------
+
+
+def test_order_raises_key_error_when_the_rank_column_is_absent():
+    block = pd.DataFrame({"src": [1, 2], "rank_attn": [1, 2]})
+    with pytest.raises(KeyError):
+        arm_overlap._order(block, "rank_dist")
+
+
+def test_order_raises_value_error_on_a_null_rank():
+    block = pd.DataFrame({"src": [1, 2, 3], "rank_dist": [1.0, np.nan, 3.0]})
+    with pytest.raises(ValueError):
+        arm_overlap._order(block, "rank_dist")
+
+
+def test_order_still_works_on_a_complete_rank_column():
+    block = pd.DataFrame({"src": [3, 1, 2], "rank_dist": [3, 1, 2]})
+    assert arm_overlap._order(block, "rank_dist") == [1, 2, 3]
+
+
+def test_attention_vs_distance_refuses_a_null_rank_dist_instead_of_fabricating_a_score():
+    # Before this fix, sort_values placed the null last and, being a stable
+    # sort, left the rest in row order -- the window then scored a
+    # fabricated 1.0 or 0.0 on that row order alone, in the direction that
+    # kills hypothesis 2. The fixed code must refuse, not guess.
+    rows = [
+        {"window_id": "eth_000000", "src": 2, "dst": 1, "module": "encoder",
+         "time_agg": "mean", "rank_attn": 1, "rank_dist": np.nan},
+        {"window_id": "eth_000000", "src": 3, "dst": 1, "module": "encoder",
+         "time_agg": "mean", "rank_attn": 2, "rank_dist": 2.0},
+    ]
+    with pytest.raises(ValueError):
+        arm_overlap.attention_vs_distance(pd.DataFrame(rows), k=1)
