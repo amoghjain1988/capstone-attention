@@ -1,13 +1,16 @@
 """Tests for the hypothesis layer.
 
-This file grows as each hypothesis file lands. For now it locks the frozen
-design. Add the choose_test and data_checks tests when those files exist.
+This file locks the frozen design, the completeness check of the ablation
+curves, and the H3 regression.
+
+THE REAL CLUSTER LABELS. An earlier version of this file installed a stand-in
+module for `src.stats.clustered`, because that file did not exist yet.
+`src/stats/clustered.py` exists now, so `h3_context.run` imports the real
+`component_clusters` and every H3 test below reads the frozen cluster unit of
+config.CLUSTER_UNIT.
 """
 
 from __future__ import annotations
-
-import sys
-import types
 
 import numpy as np
 import pandas as pd
@@ -16,6 +19,7 @@ import pytest
 import config
 from src.hypotheses import data_checks, h3_context
 from src.hypotheses.design import frozen_design
+from src.stats.clustered import component_clusters, n_clusters
 
 
 def test_frozen_design_returns_all_six_keys():
@@ -50,13 +54,24 @@ def test_frozen_design_rejects_a_design_effect_below_one():
 # ---------------------------------------------------------------------------
 
 
-def _curve_rows(window_id: str, arms: dict[str, float]) -> list[dict]:
+def _curve_rows(
+    window_id: str,
+    arms: dict[str, float],
+    mass_matched_step: int | None = 2,
+    mass_matched_shift: float = 0.1,
+) -> list[dict]:
     """Build primary-slice perturbation_curves rows for one window.
 
-    `arms` maps arm name to its shift. Every row uses config.PRIMARY_N_REMOVED
-    and config.PRIMARY_MASK_POLICY, so it lands in the primary slice check().
+    `arms` maps arm name to its shift. Every such row uses
+    config.PRIMARY_N_REMOVED and config.PRIMARY_MASK_POLICY, so it lands in
+    the primary step that check() reads.
+
+    The mass matched arm follows its own rule, so it gets its own row.
+    `mass_matched_step` is the n_removed of that row, which is the SIZE of the
+    mass matched set and not the removal step. The default of 2 is what a
+    two-edge window really writes. Pass None to leave the arm out.
     """
-    return [
+    rows = [
         {
             "window_id": window_id,
             "arm": arm,
@@ -66,6 +81,17 @@ def _curve_rows(window_id: str, arms: dict[str, float]) -> list[dict]:
         }
         for arm, shift_value in arms.items()
     ]
+    if mass_matched_step is not None:
+        rows.append(
+            {
+                "window_id": window_id,
+                "arm": data_checks.MASS_MATCHED_ARM,
+                "n_removed": int(mass_matched_step),
+                "mask_policy": config.PRIMARY_MASK_POLICY,
+                "shift": mass_matched_shift,
+            }
+        )
+    return rows
 
 
 def _complete_arms(**overrides: float) -> dict[str, float]:
@@ -105,6 +131,39 @@ def test_check_raises_when_a_required_arm_holds_a_null_shift():
         data_checks.check(pd.DataFrame(rows))
 
 
+def test_check_accepts_a_weight_matched_row_at_another_step():
+    """The mass matched arm writes the SET SIZE into n_removed.
+
+    A two-edge window needs both edges to match the mass that MoRF removes at
+    step 1, so its only weight_matched row sits at n_removed 2. The check must
+    accept that window. See the module docstring of data_checks.py.
+    """
+    rows = _curve_rows("eth_000000", _complete_arms(), mass_matched_step=2)
+    rows += _curve_rows("univ_000010", _complete_arms(), mass_matched_step=5)
+    table = data_checks.check(pd.DataFrame(rows))
+    assert (table["n_incomplete"] == 0).all()
+
+
+def test_check_raises_when_the_mass_matched_arm_is_absent():
+    rows = _curve_rows("eth_000000", _complete_arms(), mass_matched_step=None)
+    with pytest.raises(ValueError, match="eth_000000"):
+        data_checks.check(pd.DataFrame(rows))
+
+
+def test_check_raises_when_the_mass_matched_shift_is_null():
+    rows = _curve_rows("eth_000000", _complete_arms(), mass_matched_shift=np.nan)
+    with pytest.raises(ValueError, match="eth_000000"):
+        data_checks.check(pd.DataFrame(rows))
+
+
+def test_check_reads_a_window_that_lost_its_whole_primary_step():
+    """A window with rows under the policy but none at step 1 still fails."""
+    rows = _curve_rows("eth_000000", _complete_arms())
+    rows = [row for row in rows if row["n_removed"] != config.PRIMARY_N_REMOVED]
+    with pytest.raises(ValueError, match="eth_000000"):
+        data_checks.check(pd.DataFrame(rows))
+
+
 def test_check_ignores_non_primary_rows_when_the_primary_slice_is_complete():
     rows = _curve_rows("eth_000000", _complete_arms())
     # A non-primary mask_policy row is incomplete on its own, but check()
@@ -134,29 +193,25 @@ def test_check_requires_a_window_id_and_arm_column():
 # ---------------------------------------------------------------------------
 
 
-def _install_fake_component_clusters(monkeypatch, cluster_fn=None):
-    """Inject a stand-in src.stats.clustered module for h3_context's lazy
-    import. This is a TEST-ONLY stub, never a second copy of Prem's real
-    connected-component algorithm -- src/stats/clustered.py does not exist
-    yet, so h3_context.run() cannot import the real thing.
-    """
-    fake = types.ModuleType("src.stats.clustered")
-    fake.component_clusters = cluster_fn or (lambda table: table["ego_id"].to_numpy())
-    monkeypatch.setitem(sys.modules, "src.stats.clustered", fake)
-
-
 def _synthetic_h3_data(n_per_scene: int = 30, seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build a small, hand-built fi/context pair with real signal and a
-    deliberate share of TWO_EDGE_TRAP windows, across 2 scenes."""
+    deliberate share of TWO_EDGE_TRAP windows, across 2 scenes.
+
+    THE WINDOW KEY. `t0` steps by config.WINDOW_STRIDE inside each scene, and
+    each scene starts again at 0, the way src/data/windows.py builds the real
+    table. The real `component_clusters` reads `t0` out of the key and blocks
+    it by config.WINDOW_LEN, so a realistic spread of `t0` gives a realistic
+    component count. A key that packed every window of a scene into two time
+    blocks collapsed the sample into 3 clusters and left the joint Wald test
+    rank deficient.
+    """
     rng = np.random.default_rng(seed)
     rows_fi: list[dict] = []
     rows_context: list[dict] = []
-    counter = 0
 
     for scene in ("eth", "univ"):
-        for _ in range(n_per_scene):
-            window_id = f"{scene}_{counter:06d}"
-            counter += 1
+        for step in range(n_per_scene):
+            window_id = f"{scene}_{step * config.WINDOW_STRIDE:06d}"
             n_edges = int(rng.integers(2, 8))
             density = float(rng.uniform(0.0, 10.0))
             n_agents = int(rng.integers(2, 15))
@@ -193,8 +248,7 @@ def _synthetic_h3_data(n_per_scene: int = 30, seed: int = 0) -> tuple[pd.DataFra
     return pd.DataFrame(rows_fi), pd.DataFrame(rows_context)
 
 
-def test_h3_run_splits_the_two_edge_trap(monkeypatch):
-    _install_fake_component_clusters(monkeypatch)
+def test_h3_run_splits_the_two_edge_trap():
     fi, context = _synthetic_h3_data()
 
     result = h3_context.run(fi, context, cfg=config)
@@ -212,8 +266,7 @@ def test_h3_run_splits_the_two_edge_trap(monkeypatch):
     )
 
 
-def test_h3_fit_reports_a_coefficient_table_and_valid_ranges(monkeypatch):
-    _install_fake_component_clusters(monkeypatch)
+def test_h3_fit_reports_a_coefficient_table_and_valid_ranges():
     fi, context = _synthetic_h3_data()
 
     result = h3_context.run(fi, context, cfg=config)
@@ -228,8 +281,22 @@ def test_h3_fit_reports_a_coefficient_table_and_valid_ranges(monkeypatch):
         assert fit["n_clusters"] <= fit["n"]
 
 
-def test_h3_run_drops_rows_with_an_undefined_fi(monkeypatch):
-    _install_fake_component_clusters(monkeypatch)
+def test_h3_reads_the_real_component_clusters():
+    """The fit clusters on config.CLUSTER_UNIT, not on the ego id.
+
+    `h3_context.run` imports `src.stats.clustered.component_clusters` inside
+    the call. This test names the same function and checks that the fit
+    reports the same count, so no stand-in can slip back in unnoticed.
+    """
+    fi, context = _synthetic_h3_data()
+    result = h3_context.run(fi, context, cfg=config)
+
+    labels = component_clusters(fi.loc[:, ["window_id", "ego_id"]])
+    assert result["with_two_edge"]["n_clusters"] == n_clusters(labels)
+    assert n_clusters(labels) > 1
+
+
+def test_h3_run_drops_rows_with_an_undefined_fi():
     fi, context = _synthetic_h3_data()
     fi = fi.copy()
     fi.loc[fi.index[0], "fi"] = np.nan
@@ -238,22 +305,19 @@ def test_h3_run_drops_rows_with_an_undefined_fi(monkeypatch):
     assert result["with_two_edge"]["n"] == len(fi) - 1
 
 
-def test_h3_run_requires_the_context_columns(monkeypatch):
-    _install_fake_component_clusters(monkeypatch)
+def test_h3_run_requires_the_context_columns():
     fi, context = _synthetic_h3_data()
     with pytest.raises(KeyError):
         h3_context.run(fi, context.drop(columns=["density"]), cfg=config)
 
 
-def test_h3_run_requires_the_fi_columns(monkeypatch):
-    _install_fake_component_clusters(monkeypatch)
+def test_h3_run_requires_the_fi_columns():
     fi, context = _synthetic_h3_data()
     with pytest.raises(KeyError):
         h3_context.run(fi.drop(columns=["n_edges"]), context, cfg=config)
 
 
-def test_h3_run_rejects_a_non_component_cluster_unit(monkeypatch):
-    _install_fake_component_clusters(monkeypatch)
+def test_h3_run_rejects_a_non_component_cluster_unit():
     fi, context = _synthetic_h3_data()
 
     class FakeCfg:

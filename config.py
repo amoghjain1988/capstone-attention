@@ -71,6 +71,13 @@ PRIMARY_N_REMOVED = 1
 N_BOOT = 10_000
 N_PERM = 10_000
 
+# The symmetry rule of src/hypotheses/choose_test.py.
+# The paired differences D are symmetric when the bootstrap interval of the
+# sample skewness contains 0, or when the absolute skewness is below this
+# tolerance. A symmetric D gets the Wilcoxon signed-rank test, which estimates
+# the pseudomedian. A skewed D gets the sign test on the median.
+SYMMETRY_SKEW_TOL = 0.5
+
 # The cluster unit for every permutation test and every bootstrap.
 #
 # A pedestrian repeats across windows and a time block holds overlapping
@@ -111,6 +118,12 @@ POWER = 0.80 #changed by prem from none to 0.80
 
 COLLISION_RADIUS_M = 0.2
 DENSITY_RADIUS_M = 5.0
+
+# The Kalman filter of src/models/ekf.py. The process noise is the variance
+# of the acceleration, in metres per second squared, squared. The measurement
+# noise is the variance of the observed position, in metres squared.
+EKF_PROCESS_NOISE = 0.5
+EKF_MEASUREMENT_NOISE = 0.05
 
 # The share of the K draws that must hold a collision before the predictions
 # table calls the window a collision, as a bool.
