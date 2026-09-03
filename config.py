@@ -112,6 +112,19 @@ POWER = 0.80 #changed by prem from none to 0.80
 COLLISION_RADIUS_M = 0.2
 DENSITY_RADIUS_M = 5.0
 
+# The share of the K draws that must hold a collision before the predictions
+# table calls the window a collision, as a bool.
+#
+# A single draw only says whether that one sampled future collides. "Any of
+# K draws collide" only rises with K and describes the draw count, not the
+# model, so src/metrics/calibration.py reports collision_share, the fraction
+# of the K draws that collide, as the honest float. The predictions table
+# still needs a bool column per CONTRACT.md section 3, so this threshold
+# turns the share into that bool: True when a MAJORITY of the draws collide.
+# Raised with the team in TASK 3 of docs/CATHERINE_AGENT_2.md; confirm before
+# this threshold appears in a report.
+COLLISION_SHARE_THRESHOLD = 0.5
+
 # ---------------------------------------------------------------------------
 # Cleaning
 # ---------------------------------------------------------------------------
