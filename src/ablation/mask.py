@@ -70,10 +70,43 @@ def masked_predict(
     SAME `draws` for every arm of the same window, so common random numbers
     make the shifts comparable. Raise `ValueError` when `mask_policy` is not
     one of `config.MASK_POLICIES`.
+
+    This function also passes `mask_policy` to `model.predict`, so a model
+    that honours the two policies differently gives two different answers.
+    Before this fix, `mask_policy` reached this function and stopped here, so
+    `weight_zero` silently ran whatever the model's one behaviour was. That
+    is a silent duplicate, and it is wrong.
+
+    A model whose `predict` method does not accept `mask_policy` at all
+    cannot tell the two policies apart. `MockPredictor` is one such model
+    today. In that one case, and only for `config.PRIMARY_MASK_POLICY`, this
+    function calls `model.predict` without the argument, since that is the
+    one behaviour such a model already has. Any OTHER policy against a model
+    like that raises `NotImplementedError`. It never again returns a silent
+    duplicate of the primary policy under a different name.
+
+    A model that ACCEPTS `mask_policy` and then ignores its value, the way
+    this function used to, is not caught here. See
+    `tests/test_mask.py::test_a_model_that_drops_mask_policy_is_not_caught_by_this_guard`
+    for that limit, stated plainly rather than assumed away.
     """
     if mask_policy not in config.MASK_POLICIES:
         raise ValueError(
             f"mask_policy must be one of {config.MASK_POLICIES}, it is {mask_policy!r}"
         )
 
-    return model.predict(hist, edge_mask=edge_mask, draws=draws)
+    try:
+        return model.predict(
+            hist, edge_mask=edge_mask, draws=draws, mask_policy=mask_policy
+        )
+    except TypeError as error:
+        if "mask_policy" not in str(error):
+            raise
+        if mask_policy != config.PRIMARY_MASK_POLICY:
+            raise NotImplementedError(
+                f"{type(model).__name__}.predict does not accept mask_policy, so "
+                f"it cannot honour {mask_policy!r} apart from its one behaviour. "
+                f"Only {config.PRIMARY_MASK_POLICY!r} may run against a model "
+                "like this."
+            ) from error
+        return model.predict(hist, edge_mask=edge_mask, draws=draws)
