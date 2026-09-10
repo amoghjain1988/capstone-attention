@@ -86,6 +86,66 @@ def faithfulness_index(single: pd.DataFrame, morf_edge: int, tol: float = 1e-6) 
     return (morf_shift - floor) / (ceiling - floor)
 
 
+def faithfulness_from_curves(
+    curves: pd.DataFrame, edges_primary: pd.DataFrame
+) -> pd.DataFrame:
+    """Return the faithfulness table from the single rows of the ablation.
+
+    See docs/FINISH_PLAN.md section 3.11. `curves` is the perturbation_curves
+    table. `edges_primary` is the primary slice of attention_edges.
+
+    The single arm of src/ablation/driver.py already removed every edge on its
+    own, under config.PRIMARY_MASK_POLICY. Those rows are exactly the table
+    that brute_force_single builds, so this function needs no forward pass.
+    `edge_src` names the removed edge and `shift` holds its shift. morf_edge
+    is the src whose rank_attn is 1 in `edges_primary`.
+
+    The result matches schema.FAITHFULNESS. A window whose ceiling equals its
+    floor gives fi of NaN, per faithfulness_index.
+    """
+    columns = list(schema.FAITHFULNESS)
+    if len(curves) == 0:
+        return pd.DataFrame({name: pd.Series(dtype="object") for name in columns})
+
+    single = curves.loc[
+        (curves["arm"].astype(str) == "single")
+        & (curves["mask_policy"].astype(str) == config.PRIMARY_MASK_POLICY)
+    ]
+    if len(single) == 0:
+        return pd.DataFrame({name: pd.Series(dtype="object") for name in columns})
+
+    top = edges_primary.loc[edges_primary["rank_attn"].astype(int) == 1]
+    morf_of = {
+        str(window_id): int(src)
+        for window_id, src in zip(top["window_id"].astype(str), top["src"])
+    }
+
+    rows: list[dict] = []
+    for window_id, block in single.groupby(single["window_id"].astype(str), sort=True):
+        if window_id not in morf_of:
+            raise KeyError(
+                f"window {window_id!r} carries single rows but no primary edge "
+                "with rank_attn 1. The two tables come from two different runs."
+            )
+        table = pd.DataFrame(
+            {
+                "src": block["edge_src"].astype(int).to_numpy(),
+                "shift": block["shift"].astype(float).to_numpy(),
+            }
+        )
+        rows.append(
+            {
+                "window_id": window_id,
+                "ego_id": int(block["ego_id"].iloc[0]),
+                "n_edges": int(len(table)),
+                "floor": float(table["shift"].mean()),
+                "ceiling": float(table["shift"].max()),
+                "fi": faithfulness_index(table, morf_of[window_id]),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 # ---------------------------------------------------------------------------
 # The driver that produces the two output artefacts. This part is this
 # module's own design -- see the module docstring.

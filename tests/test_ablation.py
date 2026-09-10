@@ -163,14 +163,25 @@ def test_agentformer_reacts_to_a_removed_edge(hist):
 
 
 @needs_gpu
-def test_agentformer_rejects_an_unsupported_mask_policy(hist):
+def test_agentformer_rejects_an_unknown_mask_policy(hist):
+    """The model now honours both policies of config.MASK_POLICIES.
+
+    weight_zero used to raise, because only the logit mask was native. The
+    softmax patch of src/models/agentformer.py implements the second policy,
+    so weight_zero must run. Any OTHER name must still raise, so a typo can
+    never fall through to the primary policy in silence. The two policies are
+    compared against each other in tests/test_agentformer_policy.py.
+    """
     torch = pytest.importorskip("torch")
     if not torch.cuda.is_available():
         pytest.skip("no cuda device")
     from src.models.agentformer import AgentFormerPredictor
 
     model = AgentFormerPredictor("eth", device="cuda")
-    with pytest.raises(NotImplementedError, match="logit_neg_inf"):
-        model.predict(
-            hist, edge_mask=np.ones((4, 4), dtype=bool), mask_policy="weight_zero"
-        )
+    keep_all = np.ones((4, 4), dtype=bool)
+
+    with pytest.raises(NotImplementedError, match="not_a_policy"):
+        model.predict(hist, edge_mask=keep_all, mask_policy="not_a_policy")
+
+    pred = model.predict(hist, edge_mask=keep_all, mask_policy="weight_zero")
+    assert pred.shape == (config.N_SAMPLES, 4, config.N_FUT, 2)

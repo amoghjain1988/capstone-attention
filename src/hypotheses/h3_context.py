@@ -129,6 +129,61 @@ def _fit_one(table: pd.DataFrame, clusters: np.ndarray) -> dict:
     }
 
 
+def build_context(
+    windows: pd.DataFrame,
+    trajectories: pd.DataFrame,
+    edges_primary: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return the covariate table that run() expects, one row per window.
+
+    Columns: window_id, density, n_agents, closing_speed, inv_ttc. The rows
+    are the ELIGIBLE windows of `windows`. density and n_agents come from
+    `src/features/context.py::window_context_all`. closing_speed and inv_ttc
+    come from `edges_primary`, the primary slice of the attention_edges table,
+    which holds one row per edge into the ego.
+
+    THE REDUCTION. A window carries E edges, so it carries E values of
+    closing_speed and E values of inv_ttc, and run() needs exactly one of
+    each. This function takes the MAXIMUM over the edges of the window. The
+    maximum names the most urgent neighbour: the neighbour that closes on the
+    ego fastest, and the neighbour with the shortest time to collision. A mean
+    would dilute that neighbour with every distant agent of the window, and a
+    crowded window would then look calm. State this choice beside any H3
+    number, because another reduction gives another covariate.
+
+    The function raises when an eligible window carries no edge, because a
+    silent hole would drop that window from the H3 fit without a record.
+    """
+    from src.features import context as context_features
+
+    columns = ["window_id", "density", "n_agents", "closing_speed", "inv_ttc"]
+
+    per_window = context_features.window_context_all(windows, trajectories)
+    if per_window.empty:
+        return pd.DataFrame(columns=columns)
+    per_window = per_window.copy()
+    per_window["window_id"] = per_window["window_id"].astype(str)
+
+    edges = edges_primary.copy()
+    edges["window_id"] = edges["window_id"].astype(str)
+    urgent = (
+        edges.groupby("window_id", sort=False)[["closing_speed", "inv_ttc"]]
+        .max()
+        .reset_index()
+    )
+
+    merged = per_window.merge(urgent, on="window_id", how="left", validate="one_to_one")
+
+    holes = merged.loc[merged[["closing_speed", "inv_ttc"]].isna().any(axis=1)]
+    if len(holes):
+        raise ValueError(
+            f"{len(holes)} eligible windows carry no primary edge, for example "
+            f"{holes['window_id'].iloc[0]!r}. The windows table and the "
+            "attention_edges table come from two different runs."
+        )
+    return merged.loc[:, columns].reset_index(drop=True)
+
+
 def run(fi: pd.DataFrame, context: pd.DataFrame, cfg) -> dict:
     """Test H0-3: every context coefficient AND every scene term equals 0.
 

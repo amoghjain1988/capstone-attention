@@ -14,6 +14,7 @@ import pytest
 import config
 from src.models import base
 from src.models.cv import ConstantVelocity
+from src.models.ekf import ExtendedKalman
 from src.models.mock import MockPredictor
 
 GPU_READY = (config.CHECKPOINT_DIR / "manifest.json").exists()
@@ -48,9 +49,17 @@ def test_constant_velocity_returns_one_draw(hist):
     assert np.isfinite(pred).all()
 
 
+def test_extended_kalman_returns_one_draw(hist):
+    pred = ExtendedKalman().predict(hist)
+    assert pred.shape == (1, 4, config.N_FUT, 2)
+    assert pred.dtype == np.float64
+    assert np.isfinite(pred).all()
+
+
 def test_every_cpu_model_satisfies_the_protocol():
     assert isinstance(MockPredictor(), base.Predictor)
     assert isinstance(ConstantVelocity(), base.Predictor)
+    assert isinstance(ExtendedKalman(), base.Predictor)
     assert isinstance(MockPredictor(), base.MaskablePredictor)
 
 
@@ -62,6 +71,44 @@ def test_constant_velocity_is_exact():
     future = (np.arange(1, config.N_FUT + 1) * config.DT) + steps[-1]
     assert pred[0, 0, :, 0] == pytest.approx(future)
     assert pred[0, 0, :, 1] == pytest.approx(np.zeros(config.N_FUT))
+
+
+def test_extended_kalman_matches_constant_velocity_on_a_straight_line():
+    """An exact straight walk leaves no innovation, so the two agree.
+
+    The measurement of a straight walk matches the constant velocity
+    prediction at every frame, so every update adds zero and the filter keeps
+    the exact state. The tolerance of 0.05 m is far above the real gap.
+    """
+    steps = np.arange(config.N_HIST, dtype=np.float64) * config.DT
+    walk = np.stack([1.5 * steps + 2.0, -0.5 * steps - 1.0], axis=1)
+    hist = np.stack([walk, walk[::-1].copy()], axis=0)
+
+    kalman = ExtendedKalman().predict(hist)
+    straight = ConstantVelocity().predict(hist)
+    gap = np.linalg.norm(kalman - straight, axis=-1)
+    assert gap.max() < 0.05
+
+
+def test_extended_kalman_ignores_a_mask(hist):
+    """The filter reads one agent at a time, so it holds the floor of the study."""
+    model = ExtendedKalman()
+    mask = np.ones((4, 4), dtype=bool)
+    mask[0, 1] = False
+    assert np.array_equal(model.predict(hist), model.predict(hist, edge_mask=mask))
+
+
+def test_extended_kalman_process_covariance_is_the_textbook_block():
+    """Discrete white noise acceleration: q times dt^4/4, dt^3/2 and dt^2."""
+    from src.models.ekf import process_covariance
+
+    dt, q = config.DT, config.EKF_PROCESS_NOISE
+    out = process_covariance(q, dt)
+    assert out[0, 0] == pytest.approx(q * dt**4 / 4.0)
+    assert out[0, 2] == pytest.approx(q * dt**3 / 2.0)
+    assert out[2, 2] == pytest.approx(q * dt**2)
+    assert out[0, 1] == 0.0  # the x axis and the y axis stay independent
+    assert out == pytest.approx(out.T)
 
 
 def test_the_shape_check_catches_a_wrong_shape():

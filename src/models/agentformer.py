@@ -24,16 +24,32 @@ See docs/EDA_FINDINGS.md findings F13, F14 and F15.
    (N*12, N*8). PRIMARY_MODULE is the encoder, so the primary path matches the
    contract. Read the shape from the array, never assume it.
 
-MASKING. AgentFormer already carries an (N, N) additive float matrix in
+MASKING. CONTRACT.md section 5.7 names two policies. This file honours both.
+
+logit_neg_inf. AgentFormer already carries an (N, N) additive float matrix in
 data['agent_mask']. generate_mask() tiles that matrix to the token grid, and
 agent_aware_attention() adds it to the logits before the softmax. That is
-exactly the logit_neg_inf policy of CONTRACT.md section 5.7, so we do not
-patch the attention at all. We write into agent_mask.
+exactly the logit_neg_inf policy, so we do not patch the attention at all. We
+write minus infinity into agent_mask and the softmax turns it into a weight of
+exactly zero. The other weights of the row grow, because the softmax always
+normalises to 1.
+
+weight_zero. The additive mask stays at 0, so every logit survives. We patch
+the module attribute `softmax` of third_party/AgentFormer/model/agentformer_lib
+for the length of one predict() call. The wrapper calls the real softmax and
+then multiplies the result by the tiled keep matrix. There is NO
+renormalisation, so the row of the ego loses the removed mass and the other
+weights keep their old value. The two policies therefore answer two different
+questions, and a robustness check that compares them reads two real numbers.
+
+The patch is undone in a finally block, so the module attribute is the real
+torch.nn.functional.softmax again as soon as predict() returns.
 """
 
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -72,6 +88,17 @@ def _inside_agentformer():
         yield
     finally:
         os.chdir(old)
+
+
+def agentformer_lib():
+    """Return the module that holds agent_aware_attention.
+
+    The caller must already sit inside _inside_agentformer(), because the
+    AgentFormer package only imports from its own repository root. The test
+    module reads the module attribute `softmax` from here, so it can prove
+    that the weight_zero patch is undone.
+    """
+    return importlib.import_module("model.agentformer_lib")
 
 
 def _allow_full_pickle(torch_module) -> None:
@@ -176,20 +203,86 @@ class AgentFormerPredictor:
         """Write our edge mask into AgentFormer's own agent_mask.
 
         Entry (dst, src) of edge_mask is True when the edge from src into dst
-        stays. A False entry becomes minus infinity, which the softmax turns
-        into exactly zero weight. That is the logit_neg_inf policy.
+        stays.
+
+        Under logit_neg_inf a False entry becomes minus infinity, which the
+        softmax turns into a weight of exactly zero.
+
+        Under weight_zero every entry becomes 0, so no logit is touched. The
+        softmax patch of _weight_zero_softmax() removes the weight after the
+        softmax instead.
         """
+        if mask_policy not in config.MASK_POLICIES:
+            raise NotImplementedError(
+                f"{mask_policy!r} is not supported. The two policies of "
+                f"CONTRACT.md section 5.7 are {config.MASK_POLICIES}."
+            )
         if edge_mask is None:
             return
-        if mask_policy != "logit_neg_inf":
-            raise NotImplementedError(
-                f"{mask_policy!r} is not supported. AgentFormer masks the logits, "
-                "so only logit_neg_inf is native. See CONTRACT.md section 5.7."
-            )
         torch = self._torch
         keep = np.asarray(edge_mask, dtype=bool)
-        additive = np.where(keep, 0.0, NEG_INF).astype(np.float32)
+        if mask_policy == "logit_neg_inf":
+            additive = np.where(keep, 0.0, NEG_INF).astype(np.float32)
+        else:
+            additive = np.zeros(keep.shape, dtype=np.float32)
         self.model.data["agent_mask"] = torch.from_numpy(additive).to(self.device)
+
+    @contextlib.contextmanager
+    def _weight_zero_softmax(self, edge_mask: np.ndarray | None, mask_policy: str):
+        """Multiply every attention weight by the keep matrix, after the softmax.
+
+        The caller must already sit inside _inside_agentformer().
+
+        The wrapper replaces the module attribute `softmax` of
+        agentformer_lib, which the two softmax calls of agent_aware_attention
+        read at call time. The wrapper calls the real softmax, then tiles the
+        (N, N) keep matrix onto the token grid and multiplies. It never
+        renormalises, so the removed mass simply disappears.
+
+        The token grid is time-major, that is token = time * N + agent, and
+        generate_mask() tiles the (N, N) matrix with repeat(). The tile factors
+        therefore differ per call: the encoder self attention is N*8 by N*8,
+        the decoder self attention grows to N*12 by N*12 over the
+        autoregressive steps, and the cross attention is N*12 by N*8. The
+        wrapper reads both factors from the tensor at call time.
+
+        The patch is always undone, even after an error.
+        """
+        if mask_policy != "weight_zero" or edge_mask is None:
+            yield
+            return
+
+        torch = self._torch
+        n_agents = int(np.asarray(edge_mask).shape[0])
+        keep = np.asarray(edge_mask, dtype=bool).astype(np.float32)
+        keep_tensor = torch.from_numpy(keep).to(self.device)
+
+        library = agentformer_lib()
+        original = library.softmax
+
+        def wrapper(*args, **kwargs):
+            weights = original(*args, **kwargs)
+            if weights.dim() < 2:
+                raise ValueError(
+                    "the weight_zero patch expects an attention tensor of at "
+                    f"least 2 axes, it got {tuple(weights.shape)}"
+                )
+            rows, cols = int(weights.shape[-2]), int(weights.shape[-1])
+            if rows % n_agents != 0 or cols % n_agents != 0:
+                raise ValueError(
+                    "the weight_zero patch cannot tile the keep matrix onto an "
+                    f"attention grid of {rows} by {cols} tokens for "
+                    f"{n_agents} agents. Both axes must divide by the agent "
+                    "count. A start token would break this rule."
+                )
+            tiled = keep_tensor.repeat(rows // n_agents, cols // n_agents)
+            return weights * tiled
+
+        library.softmax = wrapper
+        try:
+            yield
+        finally:
+            library.softmax = original
 
     # -- the protocol -----------------------------------------------------
 
@@ -205,16 +298,20 @@ class AgentFormerPredictor:
         `draws` is accepted so that the call matches the protocol, but the
         released DLow model is deterministic, so `draws` changes nothing. Read
         the module docstring, fact 2.
+
+        `mask_policy` is one of config.MASK_POLICIES. Read the MASKING section
+        of the module docstring for the difference between the two.
         """
         hist = base.check_history(hist, self.n_hist)
         n_agents = int(hist.shape[0])
-        base.check_edge_mask(edge_mask, n_agents)
+        keep = base.check_edge_mask(edge_mask, n_agents)
 
         data = self._make_data(hist)
         with _inside_agentformer():
             self.model.set_data(data)
-            self._apply_edge_mask(edge_mask, mask_policy)
-            out, _ = self.model.inference(mode="infer", sample_num=self.n_samples)
+            self._apply_edge_mask(keep, mask_policy)
+            with self._weight_zero_softmax(keep, mask_policy):
+                out, _ = self.model.inference(mode="infer", sample_num=self.n_samples)
 
         pred = out.transpose(0, 1).contiguous() * self.traj_scale
         pred = pred.detach().cpu().numpy().astype(np.float64)
