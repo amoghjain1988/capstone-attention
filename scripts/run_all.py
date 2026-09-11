@@ -131,16 +131,19 @@ VERDICT_PRINT_COLUMNS = (
 # The one sentence of the H3 primary row and of the H3 supporting row.
 H3_PRIMARY_WHY = (
     "The headline fit drops the two-edge windows, and the wild cluster "
-    "bootstrap by component gives this p value."
+    "bootstrap by component tests the 4 context terms, with the scene fixed "
+    "effects kept in the model."
 )
 H3_SUPPORTING_WHY = (
-    "This fit keeps the two-edge windows, and the asymptotic Wald test by "
-    "component gives this p value."
+    "This fit keeps the two-edge windows, and the wild cluster bootstrap by "
+    "component tests the 4 context terms, with the scene fixed effects kept "
+    "in the model."
 )
 
 # The test name of both H3 rows.
 H3_TEST_USED = (
-    "ols with scene fixed effects, cluster-robust joint Wald test by component"
+    "ols with scene fixed effects, joint Wald test of the 4 context terms, "
+    "wild cluster bootstrap by component"
 )
 
 
@@ -800,6 +803,37 @@ def h3_design(
     return y, design.to_numpy(dtype="float64"), clusters
 
 
+def h3_bootstrap(
+    faithfulness: pd.DataFrame, context: pd.DataFrame, fit_name: str
+) -> dict:
+    """Return the wild cluster bootstrap of one H3 fit, under the context null.
+
+    The null holds the 4 context columns of the design of `h3_design`, which
+    are the columns 1 to 4. The scene dummies stay in the model and out of the
+    null. See THE JOINT TEST in `src/hypotheses/h3_context.py` for the reason.
+    """
+    from src.hypotheses import h3_context
+    from src.stats import clustered
+
+    y, design, clusters = h3_design(faithfulness, context, fit_name)
+    n_context = len(h3_context.CONTEXT_COLUMNS)
+    restriction = np.eye(design.shape[1])[1 : 1 + n_context]
+    boot = clustered.wild_cluster_bootstrap(
+        y,
+        design,
+        clusters,
+        n_boot=int(config.N_BOOT),
+        seed=int(config.SEED),
+        restriction=restriction,
+    )
+    print(
+        f"  the wild cluster bootstrap of the {fit_name} fit runs "
+        f"{boot['n_boot']:,} draws over {boot['n_clusters']} components on "
+        f"{len(y):,} windows"
+    )
+    return boot
+
+
 def h3_rows(h3: dict, faithfulness: pd.DataFrame, context: pd.DataFrame) -> list[dict]:
     """Return the H3 primary row and the H3 supporting row.
 
@@ -807,27 +841,23 @@ def h3_rows(h3: dict, faithfulness: pd.DataFrame, context: pd.DataFrame) -> list
     the fit that drops the windows at the frozen edge floor. The effect is the
     partial R squared of the context block over a scene-only model. The
     interval stays null, because a partial R squared has no cluster bootstrap
-    interval in this project. `p_raw` is the wild cluster bootstrap p value and
-    `p_wald` keeps the asymptotic Wald p value beside it.
+    interval in this project.
 
     The supporting row `h3_with_two_edge` reports the other fit, so a reader
     sees what the two-edge windows do to the answer.
-    """
-    from src.stats import clustered
 
+    In both rows `p_raw` is the wild cluster bootstrap p value of the context
+    null, and `p_wald` keeps the asymptotic Wald p value of the same null
+    beside it. Both rows use the bootstrap, because the components are too few
+    for the asymptotic test.
+    """
     headline = str(h3["headline"])
     other = "with_two_edge" if headline == "without_two_edge" else "without_two_edge"
     fit = h3[headline]
     second = h3[other]
 
-    y, design, clusters = h3_design(faithfulness, context, headline)
-    boot = clustered.wild_cluster_bootstrap(
-        y, design, clusters, n_boot=int(config.N_BOOT), seed=int(config.SEED)
-    )
-    print(
-        f"  the wild cluster bootstrap runs {boot['n_boot']:,} draws over "
-        f"{boot['n_clusters']} components on {len(y):,} windows"
-    )
+    boot = h3_bootstrap(faithfulness, context, headline)
+    boot_second = h3_bootstrap(faithfulness, context, other)
 
     primary = {
         "hypothesis": "h3",
@@ -855,7 +885,7 @@ def h3_rows(h3: dict, faithfulness: pd.DataFrame, context: pd.DataFrame) -> list
         "effect_name": "partial_r2",
         "ci_low": float("nan"),
         "ci_high": float("nan"),
-        "p_raw": float(second["joint_p"]),
+        "p_raw": float(boot_second["joint_p"]),
         "n_clusters": int(second["n_clusters"]),
         "p_wald": float(second["joint_p"]),
         "n_windows": int(second["n"]),
@@ -1006,11 +1036,11 @@ def stage_hypotheses(
         outputs/figures/hyp_*.png           the six figures
 
     THE H3 P VALUE. `src/hypotheses/h3_context.py` reports an asymptotic
-    cluster-robust Wald test. The study holds about 39 components, which is too
-    few for that asymptotic result, so this stage runs the wild cluster
-    bootstrap on the headline design and puts its joint p value into the H3
-    primary row. The asymptotic p value stays beside it in the extra table,
-    under `p_wald`.
+    cluster-robust Wald test. The study holds too few components for that
+    asymptotic result, so this stage runs the wild cluster bootstrap on the
+    design of each fit and puts its joint p value into the H3 rows. The null
+    holds the 4 context terms, and the scene fixed effects stay in the model.
+    The asymptotic p value stays beside it in the extra table, under `p_wald`.
 
     The stage returns None when the curves are absent, because every test of
     this stage reads the perturbation_curves table.

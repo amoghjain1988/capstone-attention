@@ -9,7 +9,21 @@ from __future__ import annotations
 
 import pytest
 
+import config
 from src.stats.report import build
+
+
+@pytest.fixture(autouse=True)
+def _write_to_a_temporary_directory(tmp_path, monkeypatch):
+    """build() writes the verdicts table to config.PROCESSED_DIR. Point that
+    directory at the temporary directory of the test, so that a test run never
+    writes a dummy row over the real verdicts table of the study."""
+    monkeypatch.setattr(config, "PROCESSED_DIR", tmp_path)
+
+
+def test_build_writes_to_the_directory_of_the_config(tmp_path):
+    build([_row("h1", "primary", 0.01)])
+    assert (tmp_path / "verdicts.parquet").exists()
 
 RAW_FIELDS = {
     "test_used": "wilcoxon signed-rank, one-sided",

@@ -281,6 +281,24 @@ def test_h3_fit_reports_a_coefficient_table_and_valid_ranges():
         assert fit["n_clusters"] <= fit["n"]
 
 
+def test_h3_joint_p_does_not_move_when_one_scene_shifts():
+    """The null holds the 4 context terms only. A constant shift of every fi
+    in one scene moves only the fixed effect of that scene, so the joint p and
+    the partial R squared stay the same. A null that also held the scene terms
+    would move with the shift."""
+    fi, context = _synthetic_h3_data()
+    base = h3_context.run(fi, context, cfg=config)
+
+    shifted = fi.copy()
+    in_univ = shifted["window_id"].str.startswith("univ_")
+    shifted.loc[in_univ, "fi"] = shifted.loc[in_univ, "fi"] + 5.0
+    moved = h3_context.run(shifted, context, cfg=config)
+
+    for key in ("with_two_edge", "without_two_edge"):
+        assert moved[key]["joint_p"] == pytest.approx(base[key]["joint_p"], rel=1e-6)
+        assert moved[key]["partial_r2"] == pytest.approx(base[key]["partial_r2"], rel=1e-6)
+
+
 def test_h3_reads_the_real_component_clusters():
     """The fit clusters on config.CLUSTER_UNIT, not on the ego id.
 

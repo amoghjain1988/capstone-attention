@@ -687,7 +687,31 @@ def test_the_h3_p_value_comes_from_the_wild_cluster_bootstrap(
 
     assert supporting["hypothesis"] == "h3_with_two_edge"
     assert supporting["role"] == "supporting"
-    assert supporting["p_raw"] == pytest.approx(h3["with_two_edge"]["joint_p"])
+    assert 0.0 <= supporting["p_raw"] <= 1.0
+    assert supporting["p_wald"] == pytest.approx(h3["with_two_edge"]["joint_p"])
+    assert "wild cluster bootstrap" in supporting["why"]
+
+
+def test_the_h3_bootstrap_tests_the_four_context_terms_only(planted, monkeypatch):
+    """The null of the bootstrap holds the columns 1 to 4 of the design, the
+    context terms. The intercept and the scene dummies stay out of it."""
+    from src.stats import clustered
+
+    monkeypatch.setattr(config, "N_BOOT", SMALL)
+    seen: dict = {}
+    real = clustered.wild_cluster_bootstrap
+
+    def spy(y, design, clusters, **kwargs):
+        seen["restriction"] = kwargs["restriction"]
+        seen["width"] = design.shape[1]
+        return real(y, design, clusters, **kwargs)
+
+    monkeypatch.setattr(clustered, "wild_cluster_bootstrap", spy)
+    run_all.h3_bootstrap(planted.faithfulness, planted.context, "without_two_edge")
+
+    n_context = len(h3_context.CONTEXT_COLUMNS)
+    expected = np.eye(seen["width"])[1 : 1 + n_context]
+    assert np.array_equal(seen["restriction"], expected)
 
 
 def test_the_h3_design_matches_the_headline_fit(planted):
