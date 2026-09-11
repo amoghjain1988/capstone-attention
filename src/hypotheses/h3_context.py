@@ -8,6 +8,18 @@ variance inflation factor as the collinearity check -- are this module's own
 design. Confirm them with the team before a p value from this module appears
 in a report.
 
+THE JOINT TEST. The null holds the 4 context terms only: every context
+coefficient is 0. The scene fixed effects stay in the full model and in the
+null model. CONTRACT.md asks for one test of every coefficient, the scene terms
+included, but that test fails on the real headline sample. The drop of the
+two-edge windows leaves 1 window in the scene eth. The fit gives that window
+its own level, so its residual is exactly 0. The cluster-robust covariance of
+every scene contrast then has almost no variance. A null that holds the scene
+terms therefore gives a Wald statistic that only reflects that 1 window, in the
+asymptotic test and in the wild bootstrap alike. H3 asks about the context, so
+the scene terms are nuisance terms and stay out of the null. This is also the
+null of the proposal: b1 = b2 = b3 = b4 = 0.
+
 DENSITY. CONTRACT.md section 3 names two different quantities "density": the
 `trajectories` table holds one row per agent per FRAME, and
 `src/features/context.py` holds one row per WINDOW. This module regresses on
@@ -83,9 +95,9 @@ def _fit_one(table: pd.DataFrame, clusters: np.ndarray) -> dict:
     """Fit fi ~ context + scene fixed effects, with cluster-robust errors.
 
     Returns n, n_clusters, the coefficient table, the joint Wald test of
-    every non-intercept term (context and scene both), the partial R
-    squared of the context block over a scene-only model, and the
-    collinearity check. Checks collinearity FIRST, before it fits anything:
+    the 4 context terms (the scene terms stay in the model, see THE JOINT
+    TEST in the module docstring), the partial R squared of the context
+    block over a scene-only model, and the collinearity check. Checks collinearity FIRST, before it fits anything:
     a design matrix with a near-redundant covariate can make the fit and
     the joint test unreliable, so the check must run before either.
     """
@@ -98,8 +110,8 @@ def _fit_one(table: pd.DataFrame, clusters: np.ndarray) -> dict:
     )
 
     exog_names = full.model.exog_names
-    intercept_index = exog_names.index("Intercept")
-    restriction = np.delete(np.eye(len(exog_names)), intercept_index, axis=0)
+    positions = [exog_names.index(name) for name in CONTEXT_COLUMNS]
+    restriction = np.eye(len(exog_names))[positions]
     joint = full.wald_test(restriction, use_f=True, scalar=True)
 
     reduced = smf.ols("fi ~ C(scene)", data=scored).fit()
@@ -185,7 +197,10 @@ def build_context(
 
 
 def run(fi: pd.DataFrame, context: pd.DataFrame, cfg) -> dict:
-    """Test H0-3: every context coefficient AND every scene term equals 0.
+    """Test H0-3: every context coefficient equals 0.
+
+    The scene fixed effects stay in the full model and in the null model.
+    See THE JOINT TEST in the module docstring for the reason.
 
     `fi` matches schema.FAITHFULNESS: window_id, ego_id, n_edges, floor,
     ceiling, fi. `context` carries one row per window_id with the four raw

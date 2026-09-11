@@ -898,10 +898,13 @@ def h3_figure(
     wald = _p_text(fit["joint_p"])
     clusters = int(fit["n_clusters"])
     if p_bootstrap is None:
-        line = f"asymptotic Wald joint p = {wald}"
+        line = f"asymptotic Wald joint p of the context terms = {wald}"
         second = ""
     else:
-        line = f"wild cluster bootstrap joint p = {_p_text(p_bootstrap)}"
+        line = (
+            "wild cluster bootstrap joint p of the context terms = "
+            f"{_p_text(p_bootstrap)}"
+        )
         second = (
             f". The asymptotic Wald joint p is {wald}, but {clusters} clusters "
             "are too few for that test."

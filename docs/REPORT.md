@@ -5,10 +5,10 @@ DAMO 699 Capstone Project. Final report.
 **Authors:** Amogh, Catherine, Grace (git author Oluwatola Ukel) and Prem. The
 4 names come from the TEAM box of `README.mmd`.
 
-**Supervisor:** This value is not available. No file in the repository records a
-supervisor name.
+**Supervisor:** Dr Bilal El Toufaili. **Group:** 2.
 
-**Date:** 2026-09-03. The pipeline wrote the last table on that date.
+**Date:** 2026-09-10. Stage 9 of the pipeline writes the last tables on that
+date, after the change of the H3 null in section 6.3.
 
 ---
 
@@ -27,12 +27,13 @@ scenes and 5 released checkpoints, at inference only.
 |---|---|---|
 | H1 | The removal of the strongest attention edge moves the forecast more than the removal of the weakest edge. | Reject the null. MoRF beats LeRF in 85.2 percent of 481 windows. Holm p 0.0003 over 72 components. |
 | H2 | The removal of the strongest attention edge moves the forecast more than the removal of the nearest neighbour edge. | Reject the null. MoRF beats Nearest in 80.4 percent of the non-zero windows. Holm p 0.0003 over 72 components. |
-| H3 | The context of a window explains the faithfulness index. | Do not reject the null. The wild cluster bootstrap joint p is 0.60 and the partial R squared is 0.017 over 62 components. |
+| H3 | The context of a window explains the faithfulness index. | Do not reject the null. The wild cluster bootstrap p of the 4 context terms is 0.207 and the partial R squared is 0.017 over 62 components. |
 
 The AgentFormer attention gives a faithful rank of the single edges that move
 the forecast. The top edge beats both the weakest edge and the nearest
-neighbour edge. The window context does not explain the faithfulness index, and
-the attention mass does not predict the size of the shift.
+neighbour edge. The window context does not explain the faithfulness index. A
+set of many light edges moves the forecast more than the top edge alone, but
+that comparison cannot separate the edge count from the attention mass.
 
 ---
 
@@ -68,8 +69,9 @@ orchestration stay out of scope.
   known scale between chance and the best possible edge.
 - A design that respects the real dependence in the data. The windows overlap,
   the pedestrians repeat, and only 5 scenes exist. The connected component of
-  the pedestrian by time-block graph is the cluster unit, and a simulation
-  shows that this unit is the only one that holds the false positive rate.
+  the pedestrian by time-block graph is the cluster unit. A pilot simulation
+  shows that this unit holds the false positive rate and keeps more power than
+  the scene unit. Section 3.10 states the source of that simulation.
 - A pre-committed test plan with a gate. The synthetic scene must return an
   AUROC above 0.9 before any number from the real data is reported, and the
   primary family is exactly 3 tests under the Holm correction.
@@ -92,16 +94,18 @@ source files, students001 and students003. A per-file offset of 100,000 keeps
 every frame index and every agent id unique inside a scene, and the offset is
 much larger than the window length, so no window spans 2 files.
 
-| Scene | Rows | Share of rows | Pedestrians | Mean agents per window |
+| Scene | Rows | Share of rows | Pedestrians | Mean agents per eligible stride-1 window |
 |---|---|---|---|---|
-| eth | 5,492 | 0.082 | 360 | 2.59 |
-| hotel | 6,543 | 0.098 | 389 | 3.50 |
+| eth | 5,492 | 0.082 | 360 | 3.28 |
+| hotel | 6,543 | 0.098 | 389 | 4.17 |
 | univ | 39,766 | 0.596 | 849 | 25.70 |
-| zara1 | 5,153 | 0.077 | 148 | 3.74 |
-| zara2 | 9,722 | 0.146 | 204 | 6.33 |
-| Total | 66,676 | 1.000 | 1,950 | 11.85 |
+| zara1 | 5,153 | 0.077 | 148 | 4.69 |
+| zara2 | 9,722 | 0.146 | 204 | 6.75 |
+| Total | 66,676 | 1.000 | 1,950 | 13.57 |
 
 Source: `outputs/tables/eda_summary.csv` and `outputs/tables/eda_density.csv`.
+The last column counts the 2,418 eligible windows at stride 1. Section 3.7
+gives the same column for the 481 windows of the frozen sample.
 The scene univ holds 60 percent of the rows. Section 9 states the limit that
 this imbalance creates.
 
@@ -133,10 +137,23 @@ an ego must be present for all 20 frames. A separate check reports every track
 that skips a frame, because the window builder assumes a contiguous track.
 
 The table `outputs/tables/drops.csv` holds every drop. No rule drops a row and
-no rule drops a track. One rule drops a window: a window that holds fewer than
-2 agents has no ego. That rule drops 45 windows in eth, 54 in hotel, 65 in
-zara1 and 34 in zara2, so 198 windows in total. The scene univ loses no window
-to that rule.
+no rule drops a track. Two rules drop a window of the stride-5 build. A window
+that holds fewer than 2 agents has no ego, and that rule drops 108 windows. A
+window that holds exactly 2 agents gives the ego 1 edge only, and the edge
+floor of section 3.7 drops it. That rule drops 90 windows.
+
+| Scene | Fewer than 2 agents | Exactly 2 agents | Windows dropped |
+|---|---|---|---|
+| eth | 38 | 7 | 45 |
+| hotel | 34 | 20 | 54 |
+| univ | 0 | 0 | 0 |
+| zara1 | 19 | 46 | 65 |
+| zara2 | 17 | 17 | 34 |
+| Total | 108 | 90 | 198 |
+
+Source: `data/processed/windows.parquet`, the n_agents and eligible columns.
+The counts per scene in `drops.csv` are correct, but its reason text names
+only the first rule.
 
 The table `outputs/tables/eda_missing.csv` gives a known cause for every empty
 cell. The columns vx, vy and speed hold 1,950 empty cells, one per track,
@@ -183,9 +200,10 @@ the null.
 
 E is the agent count minus 1, and the agent count is known before any model
 runs. The rule therefore selects on a pre-treatment covariate and not on an
-outcome. The rule drops 423 of the 2,841 eligible stride-1 windows and only 2.5
-percent of the compute. All 5 scenes keep 20 windows or more. A stricter value
-costs the scene eth: at a floor of 3 the scene eth falls from 32 windows to 7.
+outcome. At stride 1 the rule drops 423 of the 2,841 windows that hold an ego,
+and only 2.5 percent of the compute. At stride 1 all 5 scenes keep 20 windows
+or more. A stricter value costs the scene eth: at a floor of 3 the scene eth
+falls from 32 windows to 7 at stride 1.
 
 The frozen build gives 679 windows at stride 5, and 481 of those windows pass
 the eligibility rule.
@@ -217,38 +235,50 @@ The exploratory module therefore reports the intraclass correlation of every
 proxy that exists before the ablation and takes the largest one, because the
 largest one gives the safest answer.
 
-| Stride | Windows | Cluster unit | Design effect | Effective n | Forward passes |
+| Stride | Windows | Cluster unit | Design effect | Effective n | Forward passes, estimate |
 |---|---|---|---|---|---|
-| 1 | 2,841 | time block | 14.57 | 195 | 33,654 |
-| 5 | 571 | time block | 3.18 | 179 | 6,741 |
-| 5 | 571 | pedestrian | 1.55 | 369 | 6,741 |
-| 20 | 149 | time block | 1.00 | 149 | 1,728 |
+| 1 | 2,418 | time block | 14.52 | 167 | 32,808 |
+| 5 | 481 | time block | 3.06 | 157 | 6,578 |
+| 5 | 481 | pedestrian | 1.52 | 316 | 6,578 |
+| 20 | 125 | time block | 1.00 | 125 | 1,691 |
 
-Source: `outputs/tables/eda_overlap.csv`. The mean overlap fraction stays above
-0.99 at every stride, so the overlap never disappears.
+Source: `outputs/tables/eda_overlap.csv`, which counts the eligible windows
+under the edge floor of 2. The mean overlap fraction stays above 0.99 at every
+stride, so the overlap never disappears.
 
 ### 3.9 The frozen design
 
 The team froze the design after the exploratory analysis and before the first
-ablation run. Nobody changes a number after that commit.
+ablation run. The frozen plan uses an edge floor of 1. After the freeze the
+team raises the edge floor to 2, for the reason of section 3.7. The table puts
+the frozen plan and the current build side by side.
 
-| Design item | Frozen value |
-|---|---|
-| Window stride | 5 frames |
-| Windows at that stride | 571 |
-| Headline cluster unit for the power calculation | time block |
-| Design effect | 3.18 |
-| Effective n | 179 |
-| Alpha | 0.05 |
-| Sided | one |
-| Primary n_removed | 1 |
-| Minimum detectable effect | 0.592 |
-| Power | 0.80 |
+| Design item | Frozen plan, edge floor 1 | Current build, edge floor 2 |
+|---|---|---|
+| Window stride | 5 frames | 5 frames |
+| Windows at that stride | 571 | 481 |
+| Cluster unit for the power calculation | time block | time block |
+| Design effect | 3.18 | 3.06 |
+| Effective n | 179 | 157 |
+| Alpha | 0.05 | 0.05 |
+| Sided | one | one |
+| Primary n_removed | 1 | 1 |
+| Minimum detectable effect at power 0.80 | 0.592 | about 0.599 |
 
-The minimum effect of 0.592 is the share of windows in which MoRF gives the
-larger shift. A share of 0.5 is the null. The number is pre-committed and the
-team stated the number before it saw any p value. At the same effective n a
-power of 0.90 needs a share of 0.608.
+Sources: the frozen plan comes from the team design note `PREM_AGENT.md`,
+which is outside the repository, and from the comment in
+`src/hypotheses/design.py`. The current build comes from
+`outputs/tables/design.csv` and `outputs/tables/eda_overlap.csv`. The row that
+`design.csv` labels frozen holds the current build with the frozen minimum
+effect. The value 0.599 comes from the same normal approximation of the
+one-sided sign test that gives the frozen values.
+
+The minimum effect is the share of windows in which MoRF gives the larger
+shift. A share of 0.5 is the null. The value 0.592 is pre-committed, and the
+team stated it before it saw any p value. At the frozen effective n a power of
+0.90 needs a share of 0.608. The time block is the unit of the power
+calculation only. Every test of this report clusters on the connected
+component of section 3.10.
 
 ### 3.10 The cluster unit
 
@@ -276,7 +306,15 @@ builds the bipartite graph of the ego pedestrians against the time blocks
 inside a scene, then takes the connected component of each window. The pilot
 gives 39 components, and the test keeps 0.875 power against a true shift of
 0.03 m. The scene unit is also safe, but the scene unit loses half the power.
-Every p value in this report carries the component count beside it.
+Every p value in this report carries the component count beside it. On the 481
+windows of the frozen sample the same graph gives 72 components.
+
+Source: the comment above `CLUSTER_UNIT` in `config.py`. The 39 components and
+the 37 percent reproduce from `data/interim/windows_stride1.parquet` with
+`src/stats/clustered.py`: 39 components over 2,418 windows, and 37.3 percent of
+767 ego pedestrians in more than 1 time block. The simulation script and its
+output table are not in the repository. The false positive rates and the 0.875
+power therefore have no file that a reader can run again.
 
 ---
 
@@ -375,9 +413,15 @@ comparable.
 
 MoRF removes few heavy edges. A plain count-matched control removes the same
 number of edges but a much smaller attention mass, so a count-matched control
-confounds the mass with the rank. The weight-matched arm removes many light
-edges whose total attention reaches the mass that MoRF removed. The arm matches
-the mass, not the count, so the comparison isolates the rank.
+confounds the mass with the rank. The weight-matched arm adds the lightest
+edges, one at a time, until their total attention reaches the mass that MoRF
+removed. The arm aims to match the mass, not the count.
+
+Two facts of the build limit that match. First, the last edge overshoots the
+target, so the set removes more mass than MoRF. Second, when all the other
+edges together carry less attention than the top edge, the set must take every
+edge, the top edge included. The set then holds the MoRF edge itself. Section
+9.6 gives the counts and states what the comparison can still say.
 
 ### 5.3 The 2 mask policies
 
@@ -426,7 +470,8 @@ scene with a known true edge list. The validation module scores the edges
 against that planted truth and returns the AUROC. The AUROC must exceed 0.9. If
 the method cannot recover a graph that the team planted itself, no number from
 the real data means anything. A reversed rank order serves as the negative
-control, because a reversed rank order must fall below 0.5.
+control. The test requires its AUROC to fall below 0.9, and section 7.2 shows
+values far below 0.5.
 
 ### 5.7 The sanity checks
 
@@ -454,7 +499,9 @@ forecast more than the removal of the edge that attention ranks weakest.
     H1-1 : pseudomedian(D) > 0
 
 The comparison of MoRF against Random and the comparison of MoRF against
-Weight-matched support the claim. Neither comparison enters the primary family.
+Weight-matched are supporting rows. The first supports the claim, and section
+9.6 states the limits of the second. Neither comparison enters the primary
+family.
 
 ### 6.2 H2, beyond proximity
 
@@ -477,15 +524,22 @@ Claim: the context of a window explains the faithfulness index.
 
     FI_i    = b0 + b . context_i + scene fixed effects
     context = density, n_agents, closing_speed, inv_ttc, all z-scored
-    H0-3    : every b = 0 AND every scene term = 0
-    H1-3    : at least one of those terms is not 0
+    H0-3    : b1 = b2 = b3 = b4 = 0, the 4 context terms
+    H1-3    : at least one context term is not 0
 
-The test is one joint Wald test of every non-intercept term. 5 scenes is too
-few for a random intercept, so the scene enters as a fixed effect. The module
-checks the collinearity first with the variance inflation factor, because a
+The test is one joint Wald test of the 4 context terms. The scene fixed
+effects stay in the full model and in the null model. 5 scenes is too few for
+a random intercept, so the scene enters as a fixed effect. The module checks
+the collinearity first with the variance inflation factor, because a
 near-redundant covariate makes both the fit and the joint test unreliable. The
-standard errors cluster on the connected component. The module also reports the
-partial R squared of the context block over a scene-only model.
+standard errors cluster on the connected component. The module also reports
+the partial R squared of the context block over a scene-only model.
+
+The first run of the pipeline tests a wider null: every context term AND every
+scene term, as CONTRACT.md asks. That test is not valid on the headline
+sample, and section 9.8 gives the reason. The team therefore changes the null
+after the first run, back to the context-only null of the proposal. The
+verdict is the same under both nulls, and section 7.5 reports both.
 
 ### 6.4 The two-edge trap
 
@@ -556,9 +610,11 @@ statistic.
 The interval comes from a cluster bootstrap. For H1 and H2 the pairs cluster
 bootstrap resamples the connected components with replacement, pools the rows
 of the drawn components, applies the statistic and takes the percentile
-interval over 10,000 resamples. For H3 the wild cluster bootstrap puts
-Rademacher weights on the cluster residuals of the restricted regression fit.
-The 2 tools are not the same tool, and each hypothesis uses only its own tool.
+interval over 10,000 resamples. For H3 the wild cluster bootstrap gives the p
+value, not an interval. It puts Rademacher weights on the cluster residuals of
+the restricted regression fit, and the restricted fit imposes the context null,
+so it keeps the scene fixed effects. The 2 tools are not the same tool, and
+each hypothesis uses only its own tool.
 
 ### 6.8 The multiplicity correction
 
@@ -584,18 +640,20 @@ the Spearman correlation, the partial correlation and the attention shuffle.
 
 ## 7. Results
 
-Every number of this section comes from a table on disk. The run identifier of
-every table is `db6e67b8e6e7`, the hash of `config.py`. Section 11.2 states the
-same hash.
+Every number of this section comes from a table on disk. Every table comes from
+the configuration with the hash `db6e67b8e6e7`, and the perturbation_curves
+table records that hash in its run_id column. Section 11.2 states the same
+hash.
 
 The realised sample differs from the frozen plan. Section 3.9 names 571 windows
 at stride 5, and the team froze that plan before the edge floor rose to 2. The
-frozen row of `outputs/tables/design.csv` gives a design effect of 3.06 and an
-effective n of 157 by time block. The realised row of the same table gives 481
-windows, 72 connected components, 322 ego pedestrians and 152 time blocks. That
-row gives a design effect of 3.08 and an effective n of 156. The effective n
-holds near the frozen value, so the power statement of section 3.9 still
-stands. The scene eth keeps only 8 of the 481 windows.
+row that `outputs/tables/design.csv` labels frozen holds the current build: a
+design effect of 3.06 and an effective n of 157 by time block. The realised row
+of the same table gives 481 windows, 72 connected components, 322 ego
+pedestrians and 152 time blocks. That row gives a design effect of 3.08 and an
+effective n of 156. At that effective n the minimum detectable share is about
+0.60, and every observed share of H1 and H2 sits far above it. The scene eth
+keeps only 8 of the 481 windows.
 
 ### 7.1 Accuracy and calibration
 
@@ -708,8 +766,9 @@ is at most 0.0001. The Holm-adjusted p is 0.0003. **H1 rejects the null.**
 
 The 2 supporting rows point in 2 directions. MoRF beats Random, so the rank
 order carries information above the floor. MoRF beats the mass-matched set in
-only 27.0 percent of the windows, so the mass-matched control fails. Section
-9.6 states what that failure means.
+only 27.0 percent of the windows, so the set of light edges moves the forecast
+more than the top edge alone. Section 9.6 states what that result can and
+cannot say.
 
 Figure `outputs/figures/hyp_curves.png` shows the mean shift against n_removed
 for every arm, pooled, with a cluster bootstrap band and one small panel per
@@ -737,10 +796,12 @@ That scene therefore carries almost no information for H2. In the scene univ
 the 2 orders agree in 11 percent of the windows, so attention and proximity
 mostly name different edges there.
 
-MoRF beats Nearest in 80.4 percent of the non-zero windows. The 95 percent
+MoRF beats Nearest in 80.4 percent of the 347 non-zero windows. The 95 percent
 cluster bootstrap interval of that share runs from 75.6 percent to 84.6
-percent. The median D is 0.0087 m, with a cluster bootstrap interval of 0.0003
-m to 0.020 m. The raw p is 0.0001 over 10,000 sign-flip permutations, and the
+percent. The median D over all 481 windows is 0.0087 m, with a cluster
+bootstrap interval of 0.0003 m to 0.020 m. The 134 structural zeros pull that
+median down. Over the 347 non-zero windows the median D is 0.027 m, from
+`data/processed/perturbation_curves.parquet`. The raw p is 0.0001 over 10,000 sign-flip permutations, and the
 Holm-adjusted p is 0.0003, over 72 components. **H2 rejects the null.**
 
 The disagreement-only row repeats the primary numbers. The share is again 0.804
@@ -822,22 +883,23 @@ The headline fit is the second fit, without the two-edge windows.
 | inv_ttc | 0.010 | 0.037 | 0.791 |
 
 Source: `outputs/tables/h3_coefficients.csv`, fit without_two_edge, 421 windows
-over 62 components. The joint test covers every non-intercept term. The wild
-cluster bootstrap gives a joint p of 0.60 over 10,000 Rademacher draws. The
-partial R squared of the 4 context terms over a scene-only model is 0.017. The
-context block therefore explains 1.7 percent of the variance that the scene
-leaves.
+over 62 components. The joint test covers the 4 context terms, and the scene
+fixed effects stay in the model. The wild cluster bootstrap gives a joint p of
+0.207 over 10,000 Rademacher draws. The asymptotic cluster-robust Wald test of
+the same null gives a p of 0.056. 62 components are too few for the asymptotic
+test, so the bootstrap p is the primary p. The partial R squared of the 4
+context terms over a scene-only model is 0.017. The context block therefore
+explains 1.7 percent of the variance that the scene leaves.
 
-The asymptotic cluster-robust Wald test on the same fit gives a p of 4.0e-56,
-which rounds to 0.0000. **That value is not trustworthy, and the bootstrap p is
-the primary p.** The two-edge drop takes 7 of the 8 eth windows, so the scene
-eth keeps 1 window in the headline fit. The eth intercept therefore rests on
-that single window, and every other scene term is a contrast against it. A
-contrast against 1 window carries an almost zero standard error, so the Wald
-statistic inflates. The scene coefficients above show the same fault: each one
-carries a standard error near 0.05 and a p below 1e-31. The wild cluster
-bootstrap does not trust the asymptotic covariance, so the bootstrap p of 0.60
-is the number that the pre-registered plan reports.
+The scene terms stay out of the null for a reason. The two-edge drop takes 7 of
+the 8 eth windows, so the scene eth keeps 1 window in the headline fit. The eth
+level therefore rests on that single window, and the fit gives that window a
+residual of exactly 0. Every other scene term is a contrast against it, and
+each one carries a standard error between 0.04 and 0.09 and a p below 1e-31. A
+null that holds the scene terms therefore gives a huge Wald statistic in the
+data and in every bootstrap draw alike. The first run tests that wider null
+and reports an asymptotic p of 4.0e-56 and a bootstrap p of 0.60. Neither
+number tests the context, so this report does not use them.
 
 Among the single terms only n_agents holds a cluster-robust p below 0.05, at
 0.004, with a b of 0.135 per standard deviation. A larger crowd therefore
@@ -845,14 +907,15 @@ raises the faithfulness index a little. That single term is not the
 pre-registered test. The pre-registered test is the joint test, and the joint
 test does not reject.
 
-The first fit keeps the two-edge windows and holds 481 windows over 72
-components. That fit gives a joint p of 0.10 from the asymptotic cluster-robust
-Wald test, and a partial R squared of 0.014. The n_agents term of that fit is
-0.147, with a cluster-robust p of 0.003. Every scene term of that fit sits
-above a p of 0.48. The 2 fits therefore agree: the context block does not
-explain the index.
+The second fit keeps the two-edge windows and holds 481 windows over 72
+components. The wild cluster bootstrap gives a joint p of 0.185 for that fit,
+and the partial R squared is 0.014. The asymptotic Wald p of that fit is 0.039,
+below 0.05, but 72 components are also too few for that test. The n_agents
+term of that fit is 0.147, with a cluster-robust p of 0.003. Every scene term
+of that fit sits above a p of 0.48. The 2 bootstrap p values therefore agree:
+the context block does not explain the index.
 
-The Holm-adjusted p of the headline fit is 0.60, because 0.60 is the largest
+The Holm-adjusted p of the headline fit is 0.207, because 0.207 is the largest
 raw p of the primary family of 3. **H3 does not reject the null.**
 
 Figure `outputs/figures/hyp_faithfulness.png` shows the faithfulness index per
@@ -865,10 +928,10 @@ plot of the headline fit, with the cluster-robust interval.
 |---|---|---|---|---|---|---|---|
 | h1 | primary | sign test, sign-flip permutation, pairs cluster bootstrap | share positive 0.852 | 0.809 to 0.907 | 0.0003 | 72 | reject |
 | h2 | primary | sign test, sign-flip permutation, pairs cluster bootstrap | share positive 0.804 | 0.756 to 0.846 | 0.0003 | 72 | reject |
-| h3 | primary | OLS with scene fixed effects, joint Wald test, wild cluster bootstrap | partial R squared 0.017 | not defined | 0.60 | 62 | do not reject |
+| h3 | primary | OLS with scene fixed effects, joint Wald test of the 4 context terms, wild cluster bootstrap | partial R squared 0.017 | not defined | 0.207 | 62 | do not reject |
 
 The Holm correction covers those 3 rows and nothing else. The 3 raw p values
-are 0.0001, 0.0001 and 0.60.
+are 0.0001, 0.0001 and 0.207.
 
 | Supporting row | Test used | Effect | 95 percent interval | BH p | Components | Verdict |
 |---|---|---|---|---|---|---|
@@ -879,10 +942,10 @@ are 0.0001, 0.0001 and 0.60.
 | h2_partial_attn_shift_given_dist | partial correlation given the distance | 0.695 | 0.654 to 0.738 | 0.0 | 72 | reject |
 | h2_attention_shuffle | attention shuffle inside the scene | median D 0.039 m | not defined | 0.0001 | 72 | reject |
 
-The Benjamini-Hochberg correction covers those 6 rows. The table
-`outputs/tables/verdicts.csv` also holds a seventh supporting row,
-`h3_with_two_edge`. That row gives a partial R squared of 0.014, a raw p of
-0.10 and an adjusted p of 0.12. That row is the second H3 fit of section 7.5.
+The Benjamini-Hochberg correction covers all 7 supporting rows: the 6 rows
+above and the row `h3_with_two_edge` of `outputs/tables/verdicts.csv`. That
+seventh row gives a partial R squared of 0.014, a raw bootstrap p of 0.185 and
+an adjusted p of 0.216. That row is the second H3 fit of section 7.5.
 
 Figure `outputs/figures/hyp_summary.png` shows the summary of the 3 primary
 effects in one panel.
@@ -898,10 +961,12 @@ n_removed 1 is therefore a lookup into the single rows and costs no forward
 pass. Only the second mask policy needs new forward passes, because that policy
 changes the forward pass itself.
 
-### 8.1 Leave-one-scene-out and heterogeneity
+### 8.1 The per-scene check and heterogeneity
 
-The leave-one-scene-out check runs H1 and H2 on each scene alone. The check
-reports the heterogeneity between the scenes. The check is not 5 more tests.
+The per-scene check runs H1 and H2 on each scene alone. The code and the table
+name this check loso, but it is not a leave-one-scene-out test: it keeps 1
+scene, not 4. The check reports the heterogeneity between the scenes. The
+check is not 5 more tests.
 
 | Hypothesis | Scene | Windows | Components | Effect | Location, m | Interval, m | Raw p |
 |---|---|---|---|---|---|---|---|
@@ -1055,7 +1120,7 @@ The scene univ holds 39,766 of the 66,676 rows and a mean of 25.7 agents per
 window, against a mean of 2.6 agents in the scene eth. The scene univ also
 takes 33,146 of the 43,041 forward passes, so 77 percent of the compute. A
 pooled result therefore leans on one
-scene. The leave-one-scene-out check of section 8.1 exists for exactly this
+scene. The per-scene check of section 8.1 exists for exactly this
 reason, and a reader must read the pooled number beside the per-scene numbers.
 
 ### 9.5 Faithfulness is about the model, not about people
@@ -1065,19 +1130,33 @@ a change inside the model, not a change in the street. The study reports an
 association between the attention weight and the forecast shift. The study
 never claims that one pedestrian causes the motion of another pedestrian.
 
-### 9.6 The attention mass is not a currency of influence
+### 9.6 The mass-matched comparison cannot separate the count from the mass
 
-The mass-matched control is the one supporting comparison that fails. MoRF
-beats the mass-matched set of low-attention edges in only 27.0 percent of the
-windows, with a Benjamini-Hochberg p of 1.0. Several light edges that together
-carry the same attention mass as the single top edge move the ego MORE than
-that top edge alone. The shift therefore follows the count of removed edges at
-least as much as it follows the attention mass.
+The mass-matched comparison is the one supporting row that does not reject.
+MoRF beats the mass-matched set of low-attention edges in only 27.0 percent of
+the windows, with a Benjamini-Hochberg p of 1.0. Section 5.2 names 2 facts that
+limit this comparison. The table gives the counts.
+
+| Group of windows | Windows | What the set removes, median | Windows where MoRF wins |
+|---|---|---|---|
+| The other edges carry less attention than the top edge, so the set holds the top edge | 83 | every edge: 2 edges and 1.78 times the MoRF mass | 29 (0.349) |
+| The set holds light edges only | 398 | 5 edges and 1.15 times the MoRF mass | 101 (0.254) |
+| All windows | 481 | 4 edges and 1.21 times the MoRF mass | 130 (0.270) |
+
+Source: `data/processed/perturbation_curves.parquet`, the morf rows at
+n_removed 1 and the matched weight_matched rows under the primary policy, and
+the encoder mean slice of `data/processed/attention_edges.parquet`. The first
+group holds all 60 two-edge windows.
+
+Even in the second group the light edges move the ego more than the single top
+edge, in 3 windows of 4. The comparison does not show why, because the set
+also removes more edges and more mass than MoRF. The test therefore cannot
+separate the count of removed edges from the attention mass.
 
 This result bounds the word faithful in this report. The attention ranks single
-edges well, and H1 and H2 both show that rank. The attention mass is not a
-conserved quantity of influence. A reader must never add 2 attention weights
-and expect the sum to predict the shift.
+edges well, and H1 and H2 both show that rank. This study gives no evidence
+that a sum of attention weights measures influence. A reader must not add 2
+attention weights and expect the sum to predict the shift.
 
 ### 9.7 The scene eth keeps only 8 windows
 
@@ -1090,15 +1169,21 @@ test of eth is degenerate, because attention and proximity name the same top
 edge in 7 of the 8 windows. The headline H3 fit keeps 1 eth window, and section
 9.8 explains that fault.
 
-### 9.8 The asymptotic Wald test of H3 is not trustworthy
+### 9.8 The H3 null changes after the first run
 
 The headline H3 fit drops the two-edge windows, so the scene eth falls to 1
-window. The eth intercept then rests on that single window, and every other
-scene term is a contrast against it. Such a contrast carries an almost zero
-standard error, so the asymptotic cluster-robust Wald statistic inflates and
-returns a p of 4.0e-56. The wild cluster bootstrap does not trust that
-covariance, and it returns a joint p of 0.60. The report therefore takes the
-bootstrap p as the primary p, exactly as section 6.7 states.
+window. The fit gives that window a residual of exactly 0, and every other
+scene term is a contrast against it. The first run tests every context term
+and every scene term together, as CONTRACT.md asks. With that null the Wald
+statistic is huge in the data and in every bootstrap draw alike. The
+asymptotic p of 4.0e-56 and the bootstrap p of 0.60 of the first run therefore
+test the 1 eth window and not the context.
+
+The team therefore changes the null after the first run. The new null holds
+the 4 context terms only, the null of the proposal, and the scene fixed effects
+stay in the model. The change comes after the team saw the first results, so a
+reader must know it. The verdict is the same under both nulls: H3 does not
+reject. The primary p is now the wild cluster bootstrap p of 0.207.
 
 ---
 
@@ -1110,12 +1195,14 @@ of 481 windows, with a Holm p of 0.0003. The same edge beats the nearest
 neighbour edge in 80.4 percent of the non-zero windows, with the same Holm p.
 Proximity therefore does not explain the rank of the attention. The context of
 a window does not explain the faithfulness index, because the joint bootstrap p
-is 0.60 and the partial R squared is 0.017. The mass-matched control marks the
-limit of the claim, because MoRF beats an equal mass of light edges in only
-27.0 percent of the windows. A rank of single edges is therefore faithful, and
-a mass of attention is not. Every statement here describes the model and not
-the street, because the study masks an edge inside AgentFormer and never
-touches a real pedestrian.
+of the 4 context terms is 0.207 and the partial R squared is 0.017. The
+mass-matched comparison marks the limit of the claim. A set of light edges
+moves the forecast more than the top edge alone, and MoRF wins in only 27.0
+percent of the windows, but that set also removes more edges and more mass. A
+rank of single edges is therefore faithful, and this study gives no evidence
+that a sum of attention weights measures influence. Every statement here
+describes the model and not the street, because the study masks an edge inside
+AgentFormer and never touches a real pedestrian.
 
 The sensitivity table supports the same answer. H1 points the same way in all 5
 scenes and at every n_removed from 1 to 5. H1 also holds under both other
@@ -1130,7 +1217,7 @@ an explanation:
 - Read the map as a rank, not as a budget. The top edge is the edge that the
   model uses, and the study supports that read with H1 and H2.
 - Do not add the weights of several light edges and expect the sum to carry the
-  influence of one heavy edge. Section 9.6 shows that the sum does not.
+  influence of one heavy edge. Section 9.6 finds no support for that use.
 - Read the map beside the edge count of the window. A window with 2 edges gives
   only 2 reachable index values, so it says almost nothing.
 - Do not read the map as a statement about the street. The map explains the
@@ -1138,9 +1225,13 @@ an explanation:
 
 The next steps that this study makes possible:
 
-- A count-controlled arm beside the mass-matched arm. The mass-matched failure
-  of section 9.6 says that the count of removed edges drives the shift. The
-  next design must vary the count and the mass one at a time.
+- A cleaner mass-matched arm. Section 9.6 shows that the current arm cannot
+  separate the count of removed edges from the mass. The next design must keep
+  the top edge out of the light set, match the mass without an overshoot, and
+  vary the count and the mass one at a time.
+- A true leave-one-scene-out check. The check of section 8.1 tests each scene
+  alone. A check that drops 1 scene and tests the other 4 gives a direct
+  answer to the question whether the result holds without any one scene.
 - A forecaster with a real posterior. Section 9.1 shows that the released model
   is deterministic, so no experiment here makes a probabilistic calibration
   claim. The same pipeline runs on a stochastic model with no change to the
@@ -1186,10 +1277,17 @@ therefore comes from one frozen configuration.
 
 ### 11.3 The tests
 
-The command `python -m pytest tests/ -q` passes 412 tests and fails 0 tests, in
-19.29 s. The run reports 8 warnings and no error. Two warnings say that
-`MockPredictor` does not honour the `weight_zero` policy, so the driver writes
-only `logit_neg_inf` against that mock model.
+The command `python -m pytest tests/ -q` passes 425 tests and fails 0 tests, in
+22.09 s, on 2026-09-10. The run reports 8 warnings and no error. Two warnings
+say that a test model does not honour the `weight_zero` policy, so the driver
+writes only `logit_neg_inf` against that model. Six warnings come from
+statsmodels, on the small synthetic H3 fixture of `tests/test_run_all.py`,
+which holds 1 scene only.
+
+The test run writes no file under `data` or `outputs`. `tests/test_report.py`
+points `config.PROCESSED_DIR` at a temporary directory, because
+`src/stats/report.py::build` writes the verdicts table there. Before that
+change, the test run wrote a dummy row over `data/processed/verdicts.parquet`.
 
 The 3 tests that must always pass are `tests/test_shapes.py`, which checks that
 every predictor returns a `(K, N, 12, 2)` array, `tests/test_ablation.py`,
@@ -1205,11 +1303,13 @@ the 43,041 passes of the frozen sample. The data stages, the exploratory
 stages and every statistical stage need no GPU and no AgentFormer.
 
 The machine holds one NVIDIA GeForce RTX 5080 with 16 GB, torch 2.11 with CUDA
-12.8, Python 3.12.13 and Windows 11. The GPU ablation stage takes about 35
-minutes for the 43,041 forward passes of section 7.2. Every CPU stage together
-takes about 3 minutes. The measured time exceeds the 19 minute estimate,
-because the wall clock also holds the model load, the mask build and the
-parquet write.
+12.8, Python 3.12.13 and Windows 11. The ablation log
+`outputs/ablation_run.log` gives 31.7 minutes over the 5 scenes for the
+estimated 43,041 forward passes of section 7.2: 0.1 in eth, 0.4 in hotel, 27.2
+in univ, 0.9 in zara1 and 3.1 in zara2. The model loads come on top of that
+time. The measured time exceeds the 19 minute estimate, because the time also
+holds the mask build and the parquet write. Stage 9 alone takes about 2.6
+minutes on the CPU.
 
 ---
 
@@ -1252,6 +1352,7 @@ parquet write.
 | `data/processed/attention_edges.parquet` | One row per pair per module per time collapse: attn, row_entropy, dist_at_last_frame, closing_speed, inv_ttc, rank_attn, rank_dist. | 4, 5, 7.4 |
 | `data/processed/perturbation_curves.parquet` | One row per window, arm, n_removed, draw and mask policy: removed_mass, edge_src, run_id, shift. | 5, 7.3, 7.4, 8 |
 | `data/processed/faithfulness.parquet` | One row per window: n_edges, floor, ceiling, fi. | 5.5, 7.5 |
+| `data/processed/context.parquet` | One row per eligible window: density, n_agents, closing_speed and inv_ttc, the 4 H3 covariates. 481 rows. | 6.3, 7.5 |
 | `data/processed/predictions.parquet` | One row per window: ade, fde, minade_20, minfde_20, collision, collision_share. | 7.1 |
 | `data/processed/verdicts.parquet` | One row per claim: hypothesis, role, test_used, why, sided, effect, effect_name, ci_low, ci_high, p_raw, p_adj, n_clusters, verdict. | 7.3 to 7.6 |
 
@@ -1300,11 +1401,11 @@ tables and it is not itself a processed table.
 | `outputs/figures/hyp_loso.png` | The forest plot of the per-scene location for H1 and H2. | 8.1 |
 | `outputs/figures/hyp_summary.png` | The summary of the 3 primary effects in one panel. | 7.6 |
 
-The 6 hypothesis figure names now come from `src/hypotheses/figures.py`, which
-writes each file through `src.eda.plotting.save`. The 5 names `hyp_curves`,
-`hyp_paired`, `hyp_faithfulness`, `hyp_h3_coefficients` and `hyp_loso` match
-the files on disk. The file `hyp_summary.png` is in production at the date of
-this report, so a reader must confirm that one file before use.
+The 6 hypothesis figure names come from `src/hypotheses/figures.py`, which
+writes each file through `src.eda.plotting.save`. All 6 names match the files
+on disk. Stage 9 draws all 6 files again on 2026-09-10. Only
+`hyp_h3_coefficients.png` and `hyp_summary.png` show a new number, the H3 p of
+0.207.
 
 ### 13.4 The other artefacts
 
